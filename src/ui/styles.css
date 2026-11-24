@@ -259,3 +259,4 @@ pre.code { margin: 0; padding: 14px 16px; background: var(--panel-2); border-rad
 
 .key.pressed { box-shadow: 0 0 0 3px #22c55e, var(--key-shadow); border-color: #22c55e; transform: translateY(1px); }
 .field > span.small, .field > span.faint { font-weight: 400; }
+.key .shifted { position: absolute; top: 2px; left: 5px; font-size: 10px; font-weight: 600; color: var(--muted); max-width: 60%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }

@@ -431,10 +431,10 @@ export function createTapDance(file: DtsFile, label: string, bindings: Binding[]
   return id
 }
 
-export function createModMorph(file: DtsFile, label: string, normal: Binding, morphed: Binding, mods: string[]): string {
+export function createModMorph(file: DtsFile, label: string, normal: Binding, morphed: Binding, mods: string[], comment?: string): string {
   const container = ensureContainer(file, 'behaviors')
   const id = nodeName(label, allLabels(file))
-  const node: DtsNode = { kind: 'node', labels: [id], name: id, children: [], leading: [], tail: [] }
+  const node: DtsNode = { kind: 'node', labels: [id], name: id, children: [], leading: comment ? [`// ${comment}`] : [], tail: [] }
   setProp(node, 'compatible', quote('zmk,behavior-mod-morph'))
   setProp(node, '#binding-cells', '<0>')
   setProp(node, 'bindings', formatBindingGroups([normal, morphed]))

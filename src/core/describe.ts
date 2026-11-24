@@ -20,6 +20,11 @@ export interface Legend {
   holdLayer?: number
   doubleTap?: string
   tapHold?: string
+  /** Number of taps in a tap dance (2 for a double tap…). */
+  taps?: number
+  /** What the key does with Shift (or other modifier) held: a mod-morph. */
+  morph?: string
+  morphMods?: string
   kind: LegendKind
   /** Full description for tooltips. */
   title: string
@@ -96,7 +101,7 @@ export function describeSimple(b: Binding, ctx: DescribeCtx): Legend {
 
 export function describe(b: Binding, ctx: DescribeCtx): Legend {
   const steps = decompose(b, ctx.file, ctx.reg)
-  if (!steps || (!steps.hold && !steps.doubleTap && !steps.tapHold)) {
+  if (!steps || (!steps.hold && !steps.doubleTap && !steps.tapHold && !steps.moreTaps && !steps.morph)) {
     const def = ctx.reg.get(b.behavior)
     if (!steps && def?.kind === 'tap-dance') return { main: '⋯ ' + def.name, kind: 'special', title: `Tap dance ${def.id}` }
     return describeSimple(b, ctx)
@@ -119,6 +124,19 @@ export function describe(b: Binding, ctx: DescribeCtx): Legend {
     const t = describeSimple(steps.tapHold, ctx)
     legend.tapHold = (t.mods ?? '') + t.main
     legend.title += `\nTap then hold: ${t.title}`
+  }
+  steps.moreTaps?.forEach((t, i) => {
+    const n = i + 3
+    if (t.tap) legend.title += `\n${n} taps: ${describeSimple(t.tap, ctx).title}`
+    if (t.hold) legend.title += `\n${n} taps then hold: ${describeSimple(t.hold, ctx).title}`
+  })
+  if (steps.doubleTap || steps.tapHold || steps.moreTaps?.length) legend.taps = 2 + (steps.moreTaps?.length ?? 0)
+  if (steps.morph) {
+    const m = describeSimple(steps.morph.binding, ctx)
+    legend.morph = (m.mods ?? '') + m.main
+    const names = [...new Set(steps.morph.mods.map((x) => x.replace(/^MOD_[LR]/, '').replace('SFT', 'Shift').replace('CTL', 'Ctrl').replace('ALT', 'Alt').replace('GUI', 'Gui')))]
+    legend.morphMods = names.join('/')
+    legend.title += `\nWith ${legend.morphMods}: ${m.title}`
   }
   if (steps.holdTap) legend.title += `\n(via &${steps.holdTap})`
   return legend

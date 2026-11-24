@@ -1,16 +1,72 @@
 import { useEffect, useMemo, useState } from 'react'
 import { compose, compatibleHoldTaps, decompose, type KeySteps } from '../../core/composer.ts'
 import { describeSimple } from '../../core/describe.ts'
-import { getRaw, parseString } from '../../core/dts.ts'
-import { behaviorNode, createHoldTap } from '../../core/features.ts'
+import { getRaw, parseString, setProp } from '../../core/dts.ts'
+import { behaviorNode, behaviorUsage, createHoldTap } from '../../core/features.ts'
 import { formatBinding, getLayers, setLayerBindings, type Binding } from '../../core/keymap.ts'
 import { editKeymap, setKeyMeta, LAYER_COLORS, type Project } from '../../core/project.ts'
 import type { Store } from '../store.ts'
 import type { Ctx } from '../context.ts'
 import { Picker } from './Picker.tsx'
 
-type Step = 'tap' | 'hold' | 'doubleTap' | 'tapHold'
-const STEP_LABEL: Record<Step, string> = { tap: 'When tapped', hold: 'When held', doubleTap: 'When double-tapped', tapHold: 'When tapped, then held' }
+/** Step ids: the four Oryx steps, `t3`/`h3`… for further taps, and `morph`. */
+type Step = string
+const ORYX_STEPS = ['tap', 'hold', 'doubleTap', 'tapHold']
+const MOD_CHOICES: { label: string; mods: string[] }[] = [
+  { label: 'Shift', mods: ['MOD_LSFT', 'MOD_RSFT'] },
+  { label: 'Ctrl', mods: ['MOD_LCTL', 'MOD_RCTL'] },
+  { label: 'Alt', mods: ['MOD_LALT', 'MOD_RALT'] },
+  { label: 'Gui', mods: ['MOD_LGUI', 'MOD_RGUI'] },
+]
+
+function ordinal(n: number): string {
+  return n === 2 ? 'twice' : `${n} times`
+}
+
+function morphName(steps: KeySteps): string {
+  const mods = steps.morph?.mods ?? ['MOD_LSFT']
+  const names = MOD_CHOICES.filter((c) => c.mods.some((m) => mods.includes(m))).map((c) => c.label)
+  return names.join(' or ') || 'Shift'
+}
+
+function stepLabel(id: Step, steps: KeySteps | null): string {
+  switch (id) {
+    case 'tap': return 'When tapped'
+    case 'hold': return 'When held'
+    case 'doubleTap': return 'When double-tapped'
+    case 'tapHold': return 'When tapped, then held'
+    case 'morph': return `When ${steps ? morphName(steps) : 'Shift'} is held`
+  }
+  const n = Number(id.slice(1))
+  return id[0] === 't' ? `When tapped ${ordinal(n)}` : `When tapped ${ordinal(n - 1)}, then held`
+}
+
+function getStep(steps: KeySteps, id: Step): Binding | undefined {
+  if (id === 'morph') return steps.morph?.binding
+  if (ORYX_STEPS.includes(id)) return steps[id as 'tap']
+  const t = steps.moreTaps?.[Number(id.slice(1)) - 3]
+  return id[0] === 't' ? t?.tap : t?.hold
+}
+
+function setStepValue(steps: KeySteps, id: Step, b: Binding | undefined): KeySteps {
+  if (id === 'morph') return { ...steps, morph: b ? { binding: b, mods: steps.morph?.mods ?? ['MOD_LSFT', 'MOD_RSFT'], keepMods: steps.morph?.keepMods ?? [] } : undefined }
+  if (ORYX_STEPS.includes(id)) return { ...steps, [id]: b }
+  const i = Number(id.slice(1)) - 3
+  const more = [...(steps.moreTaps ?? [])].map((t) => ({ ...t }))
+  while (more.length <= i) more.push({})
+  more[i] = id[0] === 't' ? { ...more[i], tap: b } : { ...more[i], hold: b }
+  while (more.length && !more[more.length - 1].tap && !more[more.length - 1].hold) more.pop()
+  return { ...steps, moreTaps: more }
+}
+
+/** The steps to show: Oryx's four, then each extra tap, then the modifier alternative. */
+function visibleSteps(steps: KeySteps, extra: number): Step[] {
+  const ids = [...ORYX_STEPS]
+  const n = Math.max(steps.moreTaps?.length ?? 0, extra)
+  for (let i = 0; i < n; i++) ids.push(`t${i + 3}`, `h${i + 3}`)
+  if (steps.morph) ids.push('morph')
+  return ids
+}
 
 export function setBinding(p: Project, layer: number, pos: number, fn: (file: Project['keymap']) => Binding): Project {
   return editKeymap(p, (f) => {
@@ -34,7 +90,9 @@ export function KeyEditor({ ctx, store, layer, pos, onNewMacro, onOpenBehaviour 
   const binding = ctx.layers[layer]?.bindings[pos]
   const steps = useMemo(() => (binding ? decompose(binding, ctx.project.keymap, ctx.reg) : null), [binding, ctx])
   const [step, setStep] = useState<Step>('tap')
-  useEffect(() => { setStep('tap') }, [layer, pos])
+  const [extraTaps, setExtraTaps] = useState(0)
+  const [pendingMorph, setPendingMorph] = useState(false)
+  useEffect(() => { setStep('tap'); setExtraTaps(0); setPendingMorph(false) }, [layer, pos])
 
   if (!binding) return null
   const layerInfo = ctx.layers[layer]
@@ -46,13 +104,18 @@ export function KeyEditor({ ctx, store, layer, pos, onNewMacro, onOpenBehaviour 
 
   const setStepBinding = (s: Step, b: Binding | undefined) => {
     if (!steps) return
-    const next: KeySteps = { ...steps, [s]: b }
-    update(next, `${STEP_LABEL[s]}: ${b ? formatBinding(b) : 'cleared'} (key ${pos})`)
+    if (s === 'morph') setPendingMorph(false)
+    update(setStepValue(steps, s, b), `${stepLabel(s, steps)}: ${b ? formatBinding(b) : 'cleared'} (key ${pos})`)
   }
 
-  const stepValue = steps?.[step]
+  const ids = steps ? visibleSteps(steps, extraTaps) : []
+  if (steps && pendingMorph && !steps.morph) ids.push('morph')
+  const stepValue = steps ? getStep(steps, step) : undefined
   const ht = steps?.holdTap ? ctx.reg.get(steps.holdTap) : undefined
   const candidates = steps?.tap && steps.hold ? compatibleHoldTaps(ctx.project.keymap, steps.hold, steps.tap) : []
+  const lastTapCount = 2 + Math.max(steps?.moreTaps?.length ?? 0, extraTaps)
+  const canAddTap = !!steps && !!(steps.doubleTap || steps.tapHold) && (lastTapCount === 2 || !!getStep(steps, `t${lastTapCount}`) || !!getStep(steps, `h${lastTapCount}`))
+  const tdNode = steps?.tapDance ? behaviorNode(ctx.project.keymap, steps.tapDance) : undefined
 
   return (
     <div className="editor">
@@ -62,30 +125,48 @@ export function KeyEditor({ ctx, store, layer, pos, onNewMacro, onOpenBehaviour 
           <span className="grow" />
           <code title="ZMK binding">{formatBinding(binding)}</code>
         </div>
-        {steps ? (['tap', 'hold', 'doubleTap', 'tapHold'] as Step[]).map((s) => {
-          const v = steps[s]
+        {steps ? ids.map((s) => {
+          const v = getStep(steps, s)
           const d = v ? describeSimple(v, ctx.describe) : undefined
+          const removable = v && (s !== 'tap' || steps.hold || steps.doubleTap || steps.morph)
+          const isExtra = !ORYX_STEPS.includes(s) && s !== 'morph'
           return (
-            <div key={s} className={`step ${step === s ? 'active' : ''}`} onClick={() => setStep(s)}>
-              <div className="label">{STEP_LABEL[s]}
-                {v && s !== 'tap' && <button className="iconbtn x" title="Remove" onClick={(e) => { e.stopPropagation(); setStepBinding(s, undefined) }}>✕</button>}
-                {v && s === 'tap' && (steps.hold || steps.doubleTap) && <button className="iconbtn x" title="Remove" onClick={(e) => { e.stopPropagation(); setStepBinding(s, undefined) }}>✕</button>}
+            <div key={s} className={`step ${step === s ? 'active' : ''}`} onClick={() => setStep(s)} style={isExtra || s === 'morph' ? { borderStyle: 'dashed' } : undefined}>
+              <div className="label">{stepLabel(s, steps)}
+                {(isExtra || s === 'morph') && <span className="pill accent" style={{ marginLeft: 6, textTransform: 'none', letterSpacing: 0 }} title="A ZMK feature Oryx doesn't have">ZMK</span>}
+                {removable && <button className="iconbtn x" title="Remove" onClick={(e) => { e.stopPropagation(); setStepBinding(s, undefined) }}>✕</button>}
               </div>
               <div className="value">{d ? <>{d.mods && <span className="muted small">{d.mods}</span>}{d.main || (v!.behavior === 'trans' ? 'Transparent' : v!.behavior === 'none' ? 'Nothing' : '')}<span className="faint small mono">{formatBinding(v!)}</span></> : <span className="none">+ add</span>}</div>
             </div>
           )
         }) : (
-          <div className="banner warn">This key uses a behaviour with more steps than the tap / hold / double-tap editor can show. Edit it as code below, or under Behaviours.</div>
+          <div className="banner warn">This key uses a behaviour the step editor can't show (for example a tap dance nested in another). Edit it as code on the right, or under Behaviours.</div>
+        )}
+
+        {steps && (
+          <div className="row">
+            <button className="btn small" disabled={!canAddTap} title={canAddTap ? 'ZMK tap dances can have any number of taps' : 'Set a double tap first'} onClick={() => { setExtraTaps(lastTapCount - 1); setStep(`t${lastTapCount + 1}`) }}>+ {lastTapCount + 1}{lastTapCount + 1 === 3 ? 'rd' : 'th'} tap</button>
+            {!steps.morph && !pendingMorph && <button className="btn small" title="A different key while Shift (or another modifier) is held (ZMK mod-morph)" onClick={() => { setPendingMorph(true); setStep('morph') }}>+ When Shift is held</button>}
+          </div>
+        )}
+
+        {tdNode && (
+          <div className="card" style={{ padding: 10 }}>
+            <label className="field"><span>Tap dance: time between taps (ms)</span>
+              <input type="number" min={50} max={1000} step={10} placeholder="200 (default)" value={getRaw(tdNode, 'tapping-term-ms')?.replace(/[<>]/g, '') ?? ''} onChange={(e) => {
+                const v = e.target.value
+                store.apply((p) => editKeymap(p, (f) => { const n = behaviorNode(f, steps!.tapDance!); if (n) setProp(n, 'tapping-term-ms', v ? `<${Number(v)}>` : undefined) }), 'Tap dance timing')
+              }} />
+              <span className="small faint">&{steps!.tapDance}{behaviorUsage(ctx.project.keymap, steps!.tapDance!) > 1 ? ` · shared by ${behaviorUsage(ctx.project.keymap, steps!.tapDance!)} keys` : ''}</span>
+            </label>
+          </div>
         )}
 
         {steps?.tap && steps.hold && (
           <div className="card" style={{ padding: 10 }}>
             <div className="field">
               <span>Hold-tap behaviour</span>
-              <select value={steps.holdTap ?? ''} onChange={(e) => {
-                if (e.target.value === '__new') return
-                update({ ...steps, holdTap: e.target.value }, `Use &${e.target.value} for key ${pos}`)
-              }}>
+              <select value={steps.holdTap ?? ''} onChange={(e) => update({ ...steps, holdTap: e.target.value }, `Use &${e.target.value} for key ${pos}`)}>
                 {candidates.map((c) => <option key={c.id} value={c.id}>&{c.id}{c.name !== c.id.replace(/_/g, ' ') ? ` (${c.name})` : ''}{timing(ctx, c.id)}</option>)}
               </select>
             </div>
@@ -101,18 +182,37 @@ export function KeyEditor({ ctx, store, layer, pos, onNewMacro, onOpenBehaviour 
         {steps ? (
           <>
             <div className="row" style={{ marginBottom: 10 }}>
-              <h3 style={{ margin: 0, fontSize: 15 }}>{STEP_LABEL[step]}</h3>
+              <h3 style={{ margin: 0, fontSize: 15 }}>{stepLabel(step, steps)}</h3>
               <span className="grow" />
               {step === 'tap' && <>
                 <button className="btn small" onClick={() => update({}, `Make key ${pos} transparent`)} title="Use the key from the layer below">Transparent</button>
                 <button className="btn small" onClick={() => update({ tap: { behavior: 'none', params: [] } }, `Disable key ${pos}`)}>Nothing</button>
               </>}
             </div>
+            {step === 'morph' && (
+              <div className="row" style={{ marginBottom: 10 }}>
+                <span className="small muted">While</span>
+                <div className="modrow">
+                  {MOD_CHOICES.map((c) => {
+                    const cur = steps.morph?.mods ?? ['MOD_LSFT', 'MOD_RSFT']
+                    const on = c.mods.some((m) => cur.includes(m))
+                    return <button key={c.label} className={on ? 'on' : ''} onClick={() => {
+                      if (!steps.morph) return
+                      const next = on ? cur.filter((m) => !c.mods.includes(m)) : [...cur, ...c.mods]
+                      if (next.length) update({ ...steps, morph: { ...steps.morph, mods: next } }, 'Mod-morph modifiers')
+                    }}>{c.label}</button>
+                  })}
+                </div>
+                <span className="small muted">is held</span>
+                <label className="check small" title="Normally the modifier is removed before sending the alternative (so Shift+, sends a plain ;). Keep it to send e.g. Shift+Delete."><input type="checkbox" disabled={!steps.morph} checked={!!steps.morph?.keepMods.length} onChange={(e) => steps.morph && update({ ...steps, morph: { ...steps.morph, keepMods: e.target.checked ? steps.morph.mods : [] } }, 'Mod-morph keep modifiers')} /> keep the modifier held</label>
+              </div>
+            )}
+            {step.startsWith('t') && step !== 'tap' && step !== 'tapHold' && <p className="small muted" style={{ marginTop: 0 }}>Tap the key {ordinal(Number(step.slice(1)))} quickly. Each extra tap waits for the tap-dance timing before it sends, so keep many-tap keys off letters you type fast.</p>}
             <Picker
               key={`${layer}-${pos}-${step}`}
               ctx={ctx}
               value={stepValue}
-              role={step === 'hold' || step === 'tapHold' ? 'hold' : 'tap'}
+              role={step === 'hold' || step === 'tapHold' || step.startsWith('h') ? 'hold' : 'tap'}
               onChange={(b) => setStepBinding(step, b)}
               onNewMacro={onNewMacro}
             />

@@ -73,3 +73,13 @@ next to each ZMK setting.
 Layer tabs with index and colour; keys show the tap legend large, the hold action small at
 the bottom (layer name or modifier), modifier icons, and colour by function. Transparent
 keys show the layer below.
+
+## ZMK features beyond Oryx's model
+
+| ZMK feature | Oryx | In this editor |
+|---|---|---|
+| Tap dance with 3+ taps, each tap with its own hold | two taps only (tap/hold/double tap/tap-hold) | extra "When tapped N times" steps on the key |
+| Mod-morph (different binding while a modifier is held) | none | "When Shift is held" step, any of Shift/Ctrl/Alt/Gui, keep-mods |
+| Conditional layers (tri-layer) | none | Layer options → Turn on automatically |
+| Per-behaviour hold-trigger positions, require-prior-idle, hold-trigger-on-release | global chordal hold / tap flow | Behaviours, per hold-tap |
+| Macro pause-for-release, press/release steps | basic key sequences | Macros |

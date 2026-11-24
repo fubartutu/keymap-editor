@@ -1,21 +1,43 @@
 /**
- * Oryx-style key "steps" for ZMK.
+ * Oryx-style key "steps" for ZMK, extended with what ZMK can do beyond Oryx.
  *
- * Oryx (ZSA's configurator) models every key as up to four actions: what happens when it
- * is tapped, held, double-tapped, and tapped-then-held, and compiles that into QMK mod-taps,
- * layer-taps and tap dances. This module does the same for ZMK:
+ * Oryx (ZSA's configurator) models every key as up to four actions: tapped, held,
+ * double-tapped and tapped-then-held, compiled into QMK mod-taps, layer-taps and tap
+ * dances. This module does the same for ZMK, plus:
  *
- *   tap                      → the tap binding itself              (&kp A)
- *   tap + hold               → a hold-tap behaviour                (&mt LSHFT A, &lt NAV SPC, &hml LALT A…)
- *   + double tap / tap-hold  → a tap dance whose bindings are the above
+ *   - any number of taps (triple tap, quadruple tap…), each with its own hold action
+ *   - a "when a modifier is held" alternative (ZMK mod-morph), e.g. , → ; with Shift
+ *
+ * Compilation:
+ *   tap                         → the tap binding itself        (&kp A)
+ *   tap + hold                  → a hold-tap                     (&mt LSHFT A, &lt NAV SPC, &hml LALT A…)
+ *   2+ taps                     → a tap dance whose bindings are the above, one per tap count
+ *   + "with modifier"           → a mod-morph wrapping all of that
  *
  * Existing behaviours are reused where they fit, so decomposing and recomposing a key that
  * was written by hand gives back the same binding.
  */
 import { buildRegistry, type BehaviorDef, type BehaviorRegistry } from './behaviors.ts'
-import { getRaw, parseString, setProp, walkNodes, type DtsFile, type DtsNode } from './dts.ts'
-import { createHoldTap, createTapDance, behaviorUsage, behaviorNode } from './features.ts'
+import { getRaw, parseCells, parseString, setProp, walkNodes, type DtsFile, type DtsNode } from './dts.ts'
+import { createHoldTap, createTapDance, createModMorph, behaviorUsage, behaviorNode } from './features.ts'
 import { bindingEquals, formatBindingGroups, parseBindings, type Binding } from './keymap.ts'
+
+/** What one tap count does: tapped, and optionally held. */
+export interface TapStep {
+  tap?: Binding
+  hold?: Binding
+  /** Hold-tap behaviour used when both are set. */
+  holdTap?: string
+}
+
+export interface Morph {
+  /** What the key does while one of `mods` is held. */
+  binding: Binding
+  /** MOD_LSFT, MOD_RSFT… */
+  mods: string[]
+  /** Trigger modifiers that stay applied to `binding`. */
+  keepMods: string[]
+}
 
 export interface KeySteps {
   tap?: Binding
@@ -26,11 +48,18 @@ export interface KeySteps {
   holdTap?: string
   /** Hold-tap behaviour used for double-tap+tap-hold. */
   secondHoldTap?: string
-  /** Tap-dance behaviour, when there is a double tap. */
+  /** Third tap onwards (ZMK only; Oryx stops at two). */
+  moreTaps?: TapStep[]
+  /** Tap-dance behaviour, when there are two or more taps. */
   tapDance?: string
+  /** "When a modifier is held" alternative (ZMK mod-morph). */
+  morph?: Morph
+  /** The mod-morph behaviour implementing `morph`. */
+  modMorph?: string
 }
 
 export const GENERATED_MARK = 'keymap-editor: generated'
+export const SHIFT_MODS = ['MOD_LSFT', 'MOD_RSFT']
 
 export class ComposeError extends Error {}
 
@@ -50,34 +79,65 @@ function splitHoldTap(b: Binding, def: BehaviorDef, reg: BehaviorRegistry): { ho
   }
 }
 
-function tapDanceBindings(file: DtsFile, label: string): Binding[] | undefined {
+function nodeBindings(file: DtsFile, label: string): Binding[] | undefined {
   const node = behaviorNode(file, label)
   return node ? parseBindings(getRaw(node, 'bindings')) : undefined
 }
 
-/** Break a binding into steps. Returns null when it cannot be shown as steps (e.g. a 3-tap dance). */
-export function decompose(b: Binding, file: DtsFile, reg = buildRegistry(file)): KeySteps | null {
+function modsOf(raw: string | null | undefined): string[] {
+  return (parseCells(raw)[0] ?? '').replace(/[()]/g, '').split('|').map((x) => x.trim()).filter(Boolean)
+}
+
+function formatMods(mods: string[]): string {
+  return mods.length === 1 ? `<${mods[0]}>` : `<(${mods.join('|')})>`
+}
+
+/** One tap count: a plain binding, or a hold-tap split into tap + hold. */
+function decomposeTap(b: Binding, reg: BehaviorRegistry): TapStep | null {
   const def = reg.get(b.behavior)
   if (def?.kind === 'hold-tap' && def.holdTapBindings) {
     const { hold, tap } = splitHoldTap(b, def, reg)
     return { tap, hold, holdTap: def.id }
   }
+  // Nested tap dances and mod-morphs can't be shown as steps.
+  if (def && !def.builtin && (def.kind === 'tap-dance' || def.kind === 'mod-morph')) return null
+  return { tap: b }
+}
+
+/** Break a binding into steps. Returns null when it cannot be shown as steps. */
+export function decompose(b: Binding, file: DtsFile, reg = buildRegistry(file)): KeySteps | null {
+  const def = reg.get(b.behavior)
+
+  if (def?.kind === 'mod-morph' && !def.builtin) {
+    const node = behaviorNode(file, def.id)!
+    const inner = nodeBindings(file, def.id) ?? []
+    if (inner.length !== 2) return null
+    const base = decompose(inner[0], file, reg)
+    const alt = decomposeTap(inner[1], reg)
+    // The morphed binding must be a single action (not itself a hold-tap).
+    if (!base || base.morph || !alt || alt.hold) return null
+    return { ...base, morph: { binding: alt.tap!, mods: modsOf(getRaw(node, 'mods')), keepMods: modsOf(getRaw(node, 'keep-mods')) }, modMorph: def.id }
+  }
+
   if (def?.kind === 'tap-dance' && !def.builtin) {
-    const inner = tapDanceBindings(file, def.id) ?? []
-    if (inner.length === 0 || inner.length > 2) return null
-    const first = decompose(inner[0], file, reg)
-    if (!first || first.tapDance) return null
+    const inner = nodeBindings(file, def.id) ?? []
+    if (inner.length === 0) return null
+    const taps = inner.map((x) => decomposeTap(x, reg))
+    if (taps.some((t) => !t)) return null
+    const [first, second, ...rest] = taps as TapStep[]
     const steps: KeySteps = { tap: first.tap, hold: first.hold, holdTap: first.holdTap, tapDance: def.id }
-    if (inner[1]) {
-      const second = decompose(inner[1], file, reg)
-      if (!second || second.tapDance) return null
+    if (second) {
       steps.doubleTap = second.tap
       steps.tapHold = second.hold
       steps.secondHoldTap = second.holdTap
     }
+    if (rest.length) steps.moreTaps = rest
     return steps
   }
-  return { tap: b }
+
+  const t = decomposeTap(b, reg)
+  if (!t) return null
+  return { tap: t.tap, hold: t.hold, holdTap: t.holdTap }
 }
 
 function holdTapCandidates(reg: BehaviorRegistry, holdBeh: string, tapBeh: string): BehaviorDef[] {
@@ -92,7 +152,7 @@ export function compatibleHoldTaps(file: DtsFile, hold: Binding, tap: Binding): 
 
 function checkPassable(b: Binding, role: string, reg: BehaviorRegistry) {
   const def = reg.get(b.behavior)
-  if (b.params.length > 1 || (def?.commands && b.params.length > 1)) {
+  if (b.params.length > 1) {
     throw new ComposeError(`"${def?.name ?? b.behavior} ${b.params.join(' ')}" needs ${b.params.length} parameters, but a hold-tap can only pass one to its ${role} action. Put it in a macro and use that instead.`)
   }
 }
@@ -115,41 +175,71 @@ function makeHoldTap(file: DtsFile, hold: Binding, tap: Binding, preferred: stri
   return { behavior: chosen, params: [hold.params[0] ?? '0', tap.params[0] ?? '0'] }
 }
 
-/**
- * Turn steps back into a binding, creating hold-tap and tap-dance behaviours in `file`
- * when needed. `file` is mutated.
- */
-export function compose(steps: KeySteps, file: DtsFile): Binding {
-  const tap = steps.tap
-  if (!tap && !steps.hold) return { behavior: 'none', params: [] }
-  // Hold only: the held behaviour itself (`&mo NAV`, `&kp LSHFT`) does exactly that.
-  const first = tap && steps.hold ? makeHoldTap(file, steps.hold, tap, steps.holdTap) : (tap ?? steps.hold)!
+function composeTap(file: DtsFile, t: TapStep, fallbackTap?: Binding): Binding {
+  const tap = t.tap ?? fallbackTap
+  if (tap && t.hold) return makeHoldTap(file, t.hold, tap, t.holdTap)
+  return tap ?? t.hold ?? { behavior: 'none', params: [] }
+}
 
-  if (!steps.doubleTap && !steps.tapHold) return first
+function sameBindings(a: Binding[] | undefined, b: Binding[]): boolean {
+  return !!a && a.length === b.length && a.every((x, i) => bindingEquals(x, b[i]))
+}
 
-  const secondTap = steps.doubleTap ?? tap ?? { behavior: 'none', params: [] }
-  const second = steps.tapHold ? makeHoldTap(file, steps.tapHold, secondTap, steps.secondHoldTap) : secondTap
-  const bindings = [first, second]
-
-  // Reuse an identical tap dance if one exists.
+/** Reuse an identical behaviour of `kind`, update the key's own one in place, or create one. */
+function placeBehaviour(file: DtsFile, kind: 'tap-dance' | 'mod-morph', bindings: Binding[], own: string | undefined, match: (node: DtsNode) => boolean, create: () => string, update: (node: DtsNode) => void): string {
   const reg = buildRegistry(file)
   for (const d of reg.all) {
-    if (d.kind !== 'tap-dance' || d.builtin) continue
-    const inner = tapDanceBindings(file, d.id)
-    if (inner && inner.length === 2 && bindingEquals(inner[0], bindings[0]) && bindingEquals(inner[1], bindings[1])) {
-      return { behavior: d.id, params: [] }
-    }
+    if (d.kind !== kind || d.builtin) continue
+    const node = behaviorNode(file, d.id)
+    if (node && sameBindings(nodeBindings(file, d.id), bindings) && match(node)) return d.id
   }
-  // Update the key's own tap dance in place when nothing else uses it.
-  if (steps.tapDance && behaviorUsage(file, steps.tapDance) <= 1) {
-    const node = behaviorNode(file, steps.tapDance)
-    if (node) {
+  if (own && behaviorUsage(file, own) <= 1) {
+    const node = behaviorNode(file, own)
+    if (node && parseString(getRaw(node, 'compatible')) === `zmk,behavior-${kind}`) {
       setProp(node, 'bindings', formatBindingGroups(bindings))
-      return { behavior: steps.tapDance, params: [] }
+      update(node)
+      return own
     }
   }
-  const label = createTapDance(file, 'td_' + describeForLabel(tap ?? steps.hold!), bindings, undefined, GENERATED_MARK)
-  return { behavior: label, params: [] }
+  return create()
+}
+
+/**
+ * Turn steps back into a binding, creating hold-tap, tap-dance and mod-morph behaviours in
+ * `file` when needed. `file` is mutated.
+ */
+export function compose(steps: KeySteps, file: DtsFile): Binding {
+  if (!steps.tap && !steps.hold && !steps.morph) return { behavior: 'none', params: [] }
+  const first = composeTap(file, { tap: steps.tap, hold: steps.hold, holdTap: steps.holdTap })
+
+  let base: Binding = first
+  const more = (steps.moreTaps ?? []).filter((t) => t.tap || t.hold)
+  if (steps.doubleTap || steps.tapHold || more.length) {
+    const second = composeTap(file, { tap: steps.doubleTap, hold: steps.tapHold, holdTap: steps.secondHoldTap }, steps.tap)
+    const bindings = [first, second, ...more.map((t) => composeTap(file, t, steps.tap))]
+    const label = 'td_' + describeForLabel(steps.tap ?? steps.hold ?? first)
+    const id = placeBehaviour(file, 'tap-dance', bindings, steps.tapDance, () => true,
+      () => createTapDance(file, label, bindings, undefined, GENERATED_MARK), () => {})
+    base = { behavior: id, params: [] }
+  }
+
+  if (!steps.morph) return base
+  const morph = steps.morph
+  const mods = morph.mods.length ? morph.mods : SHIFT_MODS
+  const bindings = [base, morph.binding]
+  const label = 'mm_' + describeForLabel(steps.tap ?? base)
+  const id = placeBehaviour(file, 'mod-morph', bindings, steps.modMorph,
+    (node) => modsOf(getRaw(node, 'mods')).sort().join() === [...mods].sort().join() && modsOf(getRaw(node, 'keep-mods')).sort().join() === [...morph.keepMods].sort().join(),
+    () => {
+      const created = createModMorph(file, label, base, morph.binding, mods, GENERATED_MARK)
+      if (morph.keepMods.length) setProp(behaviorNode(file, created)!, 'keep-mods', formatMods(morph.keepMods))
+      return created
+    },
+    (node) => {
+      setProp(node, 'mods', formatMods(mods))
+      setProp(node, 'keep-mods', morph.keepMods.length ? formatMods(morph.keepMods) : undefined)
+    })
+  return { behavior: id, params: [] }
 }
 
 function describeForLabel(b: Binding): string {
@@ -157,12 +247,12 @@ function describeForLabel(b: Binding): string {
 }
 
 /**
- * Remove generated tap dances and hold-taps nothing refers to any more. Hand-written
- * behaviours are never touched.
+ * Remove generated tap dances, hold-taps and mod-morphs nothing refers to any more.
+ * Hand-written behaviours are never touched.
  */
 export function collectGarbage(file: DtsFile): string[] {
   const removed: string[] = []
-  for (let pass = 0; pass < 3; pass++) {
+  for (let pass = 0; pass < 4; pass++) {
     const doomed: DtsNode[] = []
     walkNodes(file.items, (n) => {
       if (!n.labels.length) return

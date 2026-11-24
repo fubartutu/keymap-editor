@@ -50,10 +50,25 @@ they fit:
 | tap + hold layer | `&lt NAV SPACE` |
 | tap + hold anything else | a hold-tap with matching bindings, created if needed (e.g. `<&to>, <&kp>`) |
 | + double tap / tap-then-hold | a tap dance whose bindings are the above |
+| + 3rd, 4th… tap (each may have a hold) | a longer tap dance (ZMK only: Oryx stops at two taps) |
+| + "When Shift is held" (or Ctrl/Alt/Gui) | a mod-morph wrapping all of the above (ZMK only) |
 
-Tap dances and hold-taps the editor generates are marked `// keymap-editor: generated` and
+Tap dances, hold-taps and mod-morphs the editor generates are marked `// keymap-editor: generated` and
 removed again once no key uses them. A key can get its own tapping term ("Give this key its
 own timing") like Oryx's per-key tapping term.
+
+**Beyond Oryx.** ZMK can do things Oryx can't, and the editor exposes them where you edit
+keys and layers (marked *ZMK*):
+
+- tap dances with any number of taps, each with its own hold action, and their own timing;
+- a different key while a modifier is held (mod-morph), e.g. `,` that sends `;` with Shift
+  or Backspace that sends Delete, optionally keeping the modifier;
+- conditional (tri-)layers: a layer that switches on while two or more others are on
+  (*Layer options → Turn on automatically*);
+- positional hold-taps, require-prior-idle, hold-trigger-on-release, retro tap and
+  hold-while-undecided on any hold-tap (*Behaviours*);
+- macros that pause until the key is released, key toggle, key repeat, sticky keys and
+  layers, combos limited to layers, caps word with a custom continue list.
 
 **Picking keys.** Categories, fuzzy search, a modifier row (`LC(LS(...))`), *Press a key*
 capture, one-shot and toggle variants, layer actions, Bluetooth profiles, output, RGB

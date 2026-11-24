@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { describe } from '../../core/describe.ts'
-import { formatBinding, getLayers, renameLayer, setLayerBindings, TRANS, NONE, type Binding } from '../../core/keymap.ts'
+import { formatBinding, getLayers, layerToken, renameLayer, resolveLayer, setLayerBindings, TRANS, NONE, type Binding } from '../../core/keymap.ts'
+import { getConditionalLayers, saveConditionalLayers } from '../../core/features.ts'
 import { editKeymap, layerColor, projectAddLayer, projectMoveLayer, projectRemoveLayer, LAYER_COLORS, type Project } from '../../core/project.ts'
 import { Keyboard } from '../components/Keyboard.tsx'
 import { KeyEditor } from '../components/KeyEditor.tsx'
@@ -155,7 +156,8 @@ export function LayoutView({ ctx, store, layer, setLayer, selected, setSelected,
               content: (
                 <>
                   {showPos && <span className="pos">{i}</span>}
-                  {lg.doubleTap && <span className="badge" title={`Double tap: ${lg.doubleTap}`}>2×</span>}
+                  {lg.taps && <span className="badge" title={`Tap dance: ${lg.taps} taps`}>{lg.taps}×</span>}
+                  {lg.morph && !showPos && <span className="shifted" title={`With ${lg.morphMods}: ${lg.morph}`}>{lg.morph}</span>}
                   {lg.mods && !ghost && <span className="mods">{lg.mods.replace(/\+$/, '')}</span>}
                   <span className="main" style={{ opacity: ghost ? 0.5 : 1, fontSize: main.length > 9 ? 10 : main.length > 5 ? 11 : undefined }}>{main}</span>
                   {(lg.hold || lg.tapHold) && (
@@ -232,6 +234,7 @@ function LayerMenu({ ctx, index, onClose, store, setLayer }: { ctx: Ctx; index: 
           <div className="field"><span>Colour (editor only)</span>
             <div className="swatches">{LAYER_COLORS.map((c) => <button key={c} style={{ background: c }} className={col === c ? 'on' : ''} onClick={() => store.apply((p) => ({ ...p, meta: { ...p.meta, layers: { ...p.meta.layers, [l.id]: { color: c } } } }), 'Layer colour')} />)}</div>
           </div>
+          <ConditionalLayer ctx={ctx} index={index} store={store} />
           <div className="row">
             <button className="btn" disabled={index === 0} onClick={() => { store.apply((p) => projectMoveLayer(p, index, index - 1), 'Move layer left'); setLayer(index - 1); onClose() }}>← Move left</button>
             <button className="btn" disabled={index === n - 1} onClick={() => { store.apply((p) => projectMoveLayer(p, index, index + 1), 'Move layer right'); setLayer(index + 1); onClose() }}>Move right →</button>
@@ -246,6 +249,34 @@ function LayerMenu({ ctx, index, onClose, store, setLayer }: { ctx: Ctx; index: 
           </div>
           <p className="small muted" style={{ margin: 0 }}>Reordering and deleting layers updates every layer reference: keys, combos, conditional layers, <code>#define</code>s, and the trackball's scroll/snipe and auto-mouse layers in the overlay.</p>
         </div>
+      </div>
+    </div>
+  )
+}
+
+/** ZMK conditional layers (tri-layer): this layer turns on while all the chosen layers are on. */
+function ConditionalLayer({ ctx, index, store }: { ctx: Ctx; index: number; store: Store }) {
+  const all = getConditionalLayers(ctx.project.keymap)
+  const mine = all.find((c) => resolveLayer(c.thenLayer, ctx.defines) === index)
+  const on = new Set((mine?.ifLayers ?? []).map((t) => resolveLayer(t, ctx.defines)))
+  const name = ctx.layers[index].name
+  const toggle = (i: number) => {
+    const next = new Set(on)
+    if (next.has(i)) next.delete(i); else next.add(i)
+    const ifLayers = [...next].filter((x): x is number => x !== undefined).sort((a, b) => a - b).map((x) => layerToken(x, ctx.defines))
+    const others = all.filter((c) => c !== mine)
+    const list = ifLayers.length ? [...others, { id: mine?.id ?? `${ctx.layers[index].id.replace(/^layer_/, '')}_auto`, ifLayers, thenLayer: layerToken(index, ctx.defines) }] : others
+    store.apply((p) => editKeymap(p, (f) => saveConditionalLayers(f, list)), `Conditional layer for ${name}`)
+  }
+  return (
+    <div className="field">
+      <span>Turn on automatically <span className="pill accent" style={{ textTransform: 'none' }}>ZMK</span></span>
+      <span className="small faint">{name} switches on by itself while <b>all</b> the ticked layers are on (a “tri-layer”: e.g. hold Lower and Raise together to get Adjust).{on.size === 1 ? ' Tick at least two layers.' : ''}</span>
+      <div className="row">
+        {ctx.layers.map((l, i) => i !== index && i !== 0 && (
+          <label key={l.id} className="check small"><input type="checkbox" checked={on.has(i)} onChange={() => toggle(i)} />
+            <span style={{ width: 8, height: 8, borderRadius: 8, background: layerColor(ctx.project, l.id, i) }} />{l.name}</label>
+        ))}
       </div>
     </div>
   )
