@@ -156,6 +156,7 @@ export function LayoutView({ ctx, store, layer, setLayer, selected, setSelected,
               content: (
                 <>
                   {showPos && <span className="pos">{i}</span>}
+                  {lg.adaptive && <span className="badge" style={{ right: lg.taps ? 18 : 4 }} title="Adaptive key: depends on the previous key">⟳</span>}
                   {lg.taps && <span className="badge" title={`Tap dance: ${lg.taps} taps`}>{lg.taps}×</span>}
                   {lg.morph && !showPos && <span className="shifted" title={`With ${lg.morphMods}: ${lg.morph}`}>{lg.morph}</span>}
                   {lg.mods && !ghost && <span className="mods">{lg.mods.replace(/\+$/, '')}</span>}

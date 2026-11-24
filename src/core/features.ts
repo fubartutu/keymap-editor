@@ -477,3 +477,161 @@ export function saveConditionalLayers(file: DtsFile, list: ConditionalLayer[]) {
     container.children.push(node)
   }
 }
+
+// ---------------------------------------------------------------------------
+// Leader keys (urob/zmk-leader-key)
+
+export interface LeaderSequence {
+  id: string
+  /** Keycodes typed after the leader, e.g. ['B', 'O', 'O', 'T'] or ['LS(A)']. */
+  keys: string[]
+  bindings: Binding[]
+}
+
+export interface LeaderKey {
+  label: string
+  name: string
+  ignoreKeys: string[]
+  sequences: LeaderSequence[]
+}
+
+const LEADER = 'zmk,behavior-leader-key'
+const ADAPTIVE = 'zmk,behavior-adaptive-key'
+
+function nodesByCompatible(file: DtsFile, compatible: string): DtsNode[] {
+  const out: DtsNode[] = []
+  walkNodes(file.items, (n) => { if (n.labels.length && parseString(getRaw(n, 'compatible')) === compatible) out.push(n) })
+  return out
+}
+
+function childNode(name: string, inline: boolean): DtsNode {
+  return { kind: 'node', labels: [], name, children: [], leading: [], tail: [], inline }
+}
+
+export function getLeaderKeys(file: DtsFile): LeaderKey[] {
+  return nodesByCompatible(file, LEADER).map((n) => ({
+    label: n.labels[0],
+    name: parseString(getRaw(n, 'display-name')) ?? n.labels[0].replace(/_/g, ' '),
+    ignoreKeys: parseCells(getRaw(n, 'ignore-keys')),
+    sequences: nodes(n.children).map((c) => ({ id: c.name, keys: parseCells(getRaw(c, 'sequence')), bindings: parseBindings(getRaw(c, 'bindings')) })),
+  }))
+}
+
+/** Create or update a leader key. Child sequence nodes are rewritten; unchanged ones keep their text. */
+export function saveLeaderKey(file: DtsFile, leader: LeaderKey, previousLabel?: string): string {
+  let node = behaviorNode(file, previousLabel ?? leader.label)
+  if (!node) {
+    const container = ensureContainer(file, 'behaviors')
+    const label = nodeName(leader.label || 'leader', allLabels(file))
+    node = { kind: 'node', labels: [label], name: label, children: [], leading: [], tail: [] }
+    setProp(node, 'compatible', quote(LEADER))
+    setProp(node, '#binding-cells', '<0>')
+    container.children.push(node)
+  } else if (previousLabel && leader.label !== previousLabel) {
+    const label = nodeName(leader.label, allLabels(file))
+    node.labels[0] = label
+    if (node.name === previousLabel) node.name = label
+    renameBehaviorReferences(file, previousLabel, label)
+  }
+  setProp(node, 'ignore-keys', leader.ignoreKeys.length ? `<${leader.ignoreKeys.join(' ')}>` : undefined)
+  const old = new Map(nodes(node.children).map((c) => [c.name, c]))
+  const taken = new Set<string>()
+  const kids: DtsNode[] = leader.sequences.map((seq) => {
+    const id = nodeName(seq.id || seq.keys.join('_').toLowerCase() || 'seq', taken)
+    taken.add(id)
+    const c = old.get(seq.id) ?? childNode(id, true)
+    c.name = id
+    setProp(c, 'sequence', `<${seq.keys.join(' ')}>`)
+    setProp(c, 'bindings', `<${seq.bindings.map(formatBinding).join(' ')}>`)
+    return c
+  })
+  node.children = [...node.children.filter((c) => c.kind !== 'node'), ...kids]
+  return node.labels[0]
+}
+
+// ---------------------------------------------------------------------------
+// Adaptive keys (urob/zmk-adaptive-key)
+
+export interface AdaptiveTrigger {
+  id: string
+  /** Previous keycodes that trigger this rule. */
+  triggerKeys: string[]
+  /** What to send instead (up to 4 behaviours by default, sent in sequence). */
+  bindings: Binding[]
+  /** Only if the previous key was at most this long ago. */
+  maxPriorIdleMs?: number
+  /** Only if the previous key was at least this long ago. */
+  minPriorIdleMs?: number
+  /** Modifiers must match exactly (otherwise Shift+A also matches A). */
+  strictModifiers: boolean
+  /** Delete the previous character first (sends delete-keycode, default Backspace). */
+  deletePrior: boolean
+}
+
+export interface AdaptiveKey {
+  label: string
+  name: string
+  /** What the key does when no rule matches. */
+  defaultBindings: Binding[]
+  deadKeys: string[]
+  deleteKeycode?: string
+  triggers: AdaptiveTrigger[]
+}
+
+export function getAdaptiveKeys(file: DtsFile): AdaptiveKey[] {
+  return nodesByCompatible(file, ADAPTIVE).map((n) => ({
+    label: n.labels[0],
+    name: parseString(getRaw(n, 'display-name')) ?? n.labels[0].replace(/_/g, ' '),
+    defaultBindings: parseBindings(getRaw(n, 'bindings')),
+    deadKeys: parseCells(getRaw(n, 'dead-keys')),
+    deleteKeycode: parseCells(getRaw(n, 'delete-keycode'))[0],
+    triggers: nodes(n.children).map((c) => ({
+      id: c.name,
+      triggerKeys: parseCells(getRaw(c, 'trigger-keys')),
+      bindings: parseBindings(getRaw(c, 'bindings')),
+      maxPriorIdleMs: int(getRaw(c, 'max-prior-idle-ms')),
+      minPriorIdleMs: int(getRaw(c, 'min-prior-idle-ms')),
+      strictModifiers: getRaw(c, 'strict-modifiers') === null,
+      deletePrior: getRaw(c, 'delete-prior') === null,
+    })),
+  }))
+}
+
+export function saveAdaptiveKey(file: DtsFile, ak: AdaptiveKey, previousLabel?: string): string {
+  let node = behaviorNode(file, previousLabel ?? ak.label)
+  if (!node) {
+    const container = ensureContainer(file, 'behaviors')
+    const label = nodeName(ak.label || 'ak', allLabels(file))
+    node = { kind: 'node', labels: [label], name: label, children: [], leading: [], tail: [] }
+    setProp(node, 'compatible', quote(ADAPTIVE))
+    setProp(node, '#binding-cells', '<0>')
+    container.children.push(node)
+  } else if (previousLabel && ak.label !== previousLabel) {
+    const label = nodeName(ak.label, allLabels(file))
+    node.labels[0] = label
+    if (node.name === previousLabel) node.name = label
+    renameBehaviorReferences(file, previousLabel, label)
+  }
+  setProp(node, 'bindings', `<${(ak.defaultBindings.length ? ak.defaultBindings : [{ behavior: 'none', params: [] }]).map(formatBinding).join(' ')}>`)
+  setProp(node, 'dead-keys', ak.deadKeys.length ? `<${ak.deadKeys.join(' ')}>` : undefined)
+  setProp(node, 'delete-keycode', ak.deleteKeycode ? `<${ak.deleteKeycode}>` : undefined)
+  const old = new Map(nodes(node.children).map((c) => [c.name, c]))
+  const taken = new Set<string>()
+  const kids: DtsNode[] = ak.triggers.map((t) => {
+    const id = nodeName(t.id || 'after_' + (t.triggerKeys[0] ?? 'key').toLowerCase(), taken)
+    taken.add(id)
+    const c = old.get(t.id) ?? childNode(id, true)
+    c.name = id
+    setProp(c, 'trigger-keys', `<${t.triggerKeys.join(' ')}>`)
+    setProp(c, 'max-prior-idle-ms', t.maxPriorIdleMs !== undefined ? `<${t.maxPriorIdleMs}>` : undefined)
+    setProp(c, 'min-prior-idle-ms', t.minPriorIdleMs !== undefined ? `<${t.minPriorIdleMs}>` : undefined)
+    setProp(c, 'strict-modifiers', t.strictModifiers ? null : undefined)
+    setProp(c, 'delete-prior', t.deletePrior ? null : undefined)
+    setProp(c, 'bindings', `<${t.bindings.map(formatBinding).join(' ')}>`)
+    // bindings last, like the module's examples
+    c.children.sort((a, b) => (a.kind === 'prop' && a.name === 'bindings' ? 1 : 0) - (b.kind === 'prop' && b.name === 'bindings' ? 1 : 0))
+    return c
+  })
+  node.children = [...node.children.filter((c) => c.kind !== 'node'), ...kids]
+  return node.labels[0]
+}

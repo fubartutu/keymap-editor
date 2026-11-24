@@ -157,7 +157,7 @@ const routes: Record<string, Handler> = {
     const { files } = await body(req) as { files: Record<string, string> }
     const root = requireRepo()
     const known = detectProject(root)
-    const allowed = new Set([known.keymapPath, known.metaPath, ...known.confs.map((c) => c.path), ...known.overlays.map((o) => o.path)])
+    const allowed = new Set([known.keymapPath, known.metaPath, ...known.confs.map((c) => c.path), ...known.overlays.map((o) => o.path), ...(known.west ? [known.west.path] : [])])
     for (const rel of Object.keys(files)) if (!allowed.has(rel)) throw new HttpError(400, `Refusing to write ${rel}`)
     for (const [rel, text] of Object.entries(files)) {
       const abs = inRepo(rel)
@@ -219,7 +219,7 @@ const routes: Record<string, Handler> = {
     if (!message || typeof message !== 'string') throw new HttpError(400, 'A commit message is needed')
     const root = requireRepo()
     const known = detectProject(root)
-    const paths = [known.keymapPath, known.metaPath, ...known.confs.map((c) => c.path), ...known.overlays.map((o) => o.path)].filter((p) => existsSync(join(root, p)))
+    const paths = [known.keymapPath, known.metaPath, ...known.confs.map((c) => c.path), ...known.overlays.map((o) => o.path), ...(known.west ? [known.west.path] : [])].filter((p) => existsSync(join(root, p)))
     await git(['add', '--', ...paths])
     const { stdout: staged } = await git(['diff', '--cached', '--name-only'])
     if (!staged.trim()) throw new HttpError(400, 'Nothing to commit: the keymap files have no changes')

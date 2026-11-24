@@ -83,3 +83,5 @@ keys show the layer below.
 | Conditional layers (tri-layer) | none | Layer options → Turn on automatically |
 | Per-behaviour hold-trigger positions, require-prior-idle, hold-trigger-on-release | global chordal hold / tap flow | Behaviours, per hold-tap |
 | Macro pause-for-release, press/release steps | basic key sequences | Macros |
+| Leader key (module `urob/zmk-leader-key`) | none (QMK has one, Oryx doesn't expose it) | Behaviours → Leader key |
+| Adaptive keys (module `urob/zmk-adaptive-key`) | none | Behaviours → Adaptive key |

@@ -113,6 +113,8 @@ export function detectProject(root: string): ProjectFiles {
     github = url.match(/github\.com[:/](.+?)(\.git)?$/)?.[1]
   } catch { /* not a git repo */ }
 
+  const westPath = join(configDir, 'west.yml')
+  const westText = read(westPath)
   const metaPath = join(configDir, 'keymap-editor.json')
   return {
     root, name,
@@ -121,6 +123,7 @@ export function detectProject(root: string): ProjectFiles {
     metaPath: relative(root, metaPath),
     meta: read(metaPath),
     layout, features, github,
+    west: westText !== null ? { path: relative(root, westPath), text: westText } : undefined,
   }
 }
 

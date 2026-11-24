@@ -12,6 +12,7 @@ import { Keyboard } from '../components/Keyboard.tsx'
 import { Picker } from '../components/Picker.tsx'
 import type { Ctx } from '../context.ts'
 import type { Store } from '../store.ts'
+import { AdaptiveEditor, LeaderEditor, MODULE_TEMPLATES, withModule } from './ModuleEditors.tsx'
 
 const OVERRIDABLE = ['mt', 'lt', 'sk', 'sl', 'caps_word', 'key_repeat']
 
@@ -23,7 +24,9 @@ export function BehaviorsView({ ctx, store, initial }: { ctx: Ctx; store: Store;
     ['Hold-taps', custom.filter((d) => d.kind === 'hold-tap')],
     ['Tap dances', custom.filter((d) => d.kind === 'tap-dance')],
     ['Mod-morphs', custom.filter((d) => d.kind === 'mod-morph')],
-    ['Other', custom.filter((d) => !['hold-tap', 'tap-dance', 'mod-morph'].includes(d.kind))],
+    ['Leader keys', custom.filter((d) => d.kind === 'leader')],
+    ['Adaptive keys', custom.filter((d) => d.kind === 'adaptive')],
+    ['Other', custom.filter((d) => !['hold-tap', 'tap-dance', 'mod-morph', 'leader', 'adaptive'].includes(d.kind))],
   ]
   const isOverride = sel?.startsWith('&')
   return (
@@ -63,6 +66,8 @@ export function BehaviorsView({ ctx, store, initial }: { ctx: Ctx; store: Store;
         </div>
         {creating ? <CreateBehaviour ctx={ctx} store={store} onDone={(id) => { setCreating(false); if (id) setSel(id) }} />
           : isOverride ? <OverrideEditor key={sel} ctx={ctx} store={store} id={sel!.slice(1)} />
+            : sel && ctx.reg.get(sel)?.kind === 'leader' ? <LeaderEditor key={sel} ctx={ctx} store={store} id={sel} onRenamed={setSel} onDeleted={() => setSel(undefined)} />
+            : sel && ctx.reg.get(sel)?.kind === 'adaptive' ? <AdaptiveEditor key={sel} ctx={ctx} store={store} id={sel} onRenamed={setSel} onDeleted={() => setSel(undefined)} />
             : sel && behaviorNode(ctx.project.keymap, sel) ? <BehaviourEditor key={sel} ctx={ctx} store={store} id={sel} onRenamed={setSel} onDeleted={() => setSel(undefined)} />
               : <div className="card empty">Select a behaviour.</div>}
       </div>
@@ -288,6 +293,18 @@ function CreateBehaviour({ ctx, store, onDone }: { ctx: Ctx; store: Store; onDon
         {TEMPLATES.map((t) => (
           <div key={t.id} className="item" onClick={() => make(t.id)}>
             <div className="grow"><div style={{ fontWeight: 600 }}>{t.name}</div><div className="small muted">{t.desc}</div></div><span className="btn small">Create</span>
+          </div>
+        ))}
+      </div>
+      <div className="small muted" style={{ padding: '10px 14px 2px', fontWeight: 600 }}>From ZMK modules (not in Oryx) · adds the module to west.yml</div>
+      <div className="list">
+        {MODULE_TEMPLATES.map((t) => (
+          <div key={t.id} className="item" onClick={() => {
+            let created: string | undefined
+            store.apply((p) => withModule(p, t.compatible, (f) => { created = t.make(f) }), `New ${t.name}`)
+            onDone(created)
+          }}>
+            <div className="grow"><div style={{ fontWeight: 600 }}>{t.name} <span className="pill accent">ZMK module</span></div><div className="small muted">{t.desc}</div></div><span className="btn small">Create</span>
           </div>
         ))}
       </div>

@@ -260,3 +260,10 @@ pre.code { margin: 0; padding: 14px 16px; background: var(--panel-2); border-rad
 .key.pressed { box-shadow: 0 0 0 3px #22c55e, var(--key-shadow); border-color: #22c55e; transform: translateY(1px); }
 .field > span.small, .field > span.faint { font-weight: 400; }
 .key .shifted { position: absolute; top: 2px; left: 5px; font-size: 10px; font-weight: 600; color: var(--muted); max-width: 60%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 4px 2px 9px; border-radius: 8px; border: 1px solid var(--key-edge); background: var(--key); box-shadow: var(--key-shadow); font-size: 13px; }
+.chip .iconbtn { padding: 0 4px; }
+.suggest { position: absolute; z-index: 20; top: 100%; left: 0; min-width: 200px; background: var(--panel); border: 1px solid var(--border-strong); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.15); display: flex; flex-direction: column; padding: 4px; }
+.suggest button { text-align: left; border: 0; background: none; padding: 5px 8px; border-radius: 6px; cursor: pointer; }
+.suggest button:hover { background: var(--panel-2); }
+.rule { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; background: var(--panel); }
+.rule .head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }

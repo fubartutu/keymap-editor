@@ -27,6 +27,8 @@ export interface ProjectFiles {
   features: Features
   /** Path of the GitHub remote, if any (owner/repo). */
   github?: string
+  /** config/west.yml (modules). */
+  west?: { path: string; text: string }
 }
 
 export interface Features {
@@ -57,6 +59,7 @@ export interface Project {
   confs: ConfFile[]
   overlays: OverlayFile[]
   meta: EditorMeta
+  west?: { path: string; text: string }
 }
 
 export const LAYER_COLORS = ['#3b82f6', '#a855f7', '#10b981', '#f59e0b', '#ef4444', '#06b6d4', '#ec4899', '#84cc16', '#f97316', '#6366f1', '#14b8a6', '#eab308']
@@ -66,7 +69,7 @@ export function loadProject(files: ProjectFiles): Project {
   if (files.meta) {
     try { meta = { ...DEFAULT_META, ...JSON.parse(files.meta) } } catch { /* ignore a broken sidecar */ }
   }
-  return { files, keymap: parseDts(files.keymap), confs: files.confs.map((c) => ({ ...c })), overlays: files.overlays.map((o) => ({ ...o })), meta }
+  return { files, keymap: parseDts(files.keymap), confs: files.confs.map((c) => ({ ...c })), overlays: files.overlays.map((o) => ({ ...o })), meta, west: files.west ? { ...files.west } : undefined }
 }
 
 /** Apply a mutation to a copy of the keymap tree. */
@@ -186,6 +189,7 @@ export function serializeProject(p: Project): SaveResult {
     const orig = p.files.confs.find((x) => x.path === c.path)
     if (!orig || orig.text !== c.text) files[c.path] = c.text
   }
+  if (p.west && p.files.west && p.west.text !== p.files.west.text) files[p.west.path] = p.west.text
   const metaText = JSON.stringify(p.meta, null, 2) + '\n'
   if (metaText !== (p.files.meta ?? '') && (p.files.meta !== null || JSON.stringify(p.meta) !== JSON.stringify(DEFAULT_META))) files[p.files.metaPath] = metaText
   return { files, notes }
@@ -198,12 +202,14 @@ export function markSaved(p: Project, saved: Record<string, string>): Project {
   files.overlays = files.overlays.map((o) => ({ ...o, text: saved[o.path] ?? o.text }))
   files.confs = files.confs.map((c) => ({ ...c, text: saved[c.path] ?? c.text }))
   if (saved[files.metaPath] !== undefined) files.meta = saved[files.metaPath]
+  if (files.west && saved[files.west.path] !== undefined) files.west = { ...files.west, text: saved[files.west.path] }
   return {
     ...p,
     files,
     keymap: parseDts(files.keymap),
     overlays: files.overlays.map((o) => ({ ...o })),
     confs: files.confs.map((c) => ({ ...c })),
+    west: files.west ? { ...files.west } : undefined,
   }
 }
 

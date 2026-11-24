@@ -19,7 +19,7 @@ export interface Command {
 
 export type BehaviorKind =
   | 'key' | 'hold-tap' | 'tap-dance' | 'mod-morph' | 'macro' | 'sticky' | 'layer' | 'command' | 'mouse'
-  | 'special' | 'caps-word' | 'repeat' | 'other'
+  | 'special' | 'caps-word' | 'repeat' | 'leader' | 'adaptive' | 'other'
 
 export interface BehaviorDef {
   /** Label without `&`, e.g. `kp`. */
@@ -46,7 +46,7 @@ export interface BehaviorDef {
 
 export type BehaviorCategory =
   | 'Keys' | 'Layers' | 'Mouse' | 'Bluetooth & output' | 'Lighting & power' | 'Firmware' | 'Special'
-  | 'Hold-taps' | 'Tap dances' | 'Mod-morphs' | 'Macros' | 'Other behaviours'
+  | 'Hold-taps' | 'Tap dances' | 'Mod-morphs' | 'Macros' | 'Leader keys' | 'Adaptive keys' | 'Other behaviours'
 
 const DOCS = 'https://zmk.dev/docs/keymaps/behaviors/'
 
@@ -144,6 +144,9 @@ const KIND_BY_COMPATIBLE: Record<string, { kind: BehaviorKind; category: Behavio
   'zmk,behavior-sticky-key': { kind: 'sticky', category: 'Keys', name: 'Sticky key' },
   'zmk,behavior-caps-word': { kind: 'caps-word', category: 'Special', name: 'Caps word' },
   'zmk,behavior-key-repeat': { kind: 'repeat', category: 'Special', name: 'Key repeat' },
+  // Modules (urob/zmk-leader-key, urob/zmk-adaptive-key)
+  'zmk,behavior-leader-key': { kind: 'leader', category: 'Leader keys', name: 'Leader key' },
+  'zmk,behavior-adaptive-key': { kind: 'adaptive', category: 'Adaptive keys', name: 'Adaptive key' },
 }
 
 /** Behaviours defined in the keymap itself (`behaviors { ... }`, `macros { ... }`, anywhere with a label). */

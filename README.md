@@ -67,8 +67,18 @@ keys and layers (marked *ZMK*):
   (*Layer options → Turn on automatically*);
 - positional hold-taps, require-prior-idle, hold-trigger-on-release, retro tap and
   hold-while-undecided on any hold-tap (*Behaviours*);
+- **leader keys** (urob's `zmk-leader-key` module): press the leader, then type a sequence
+  such as `B O O T` or `E P` to run any behaviour or macro. Sequences are recorded by typing
+  them, and clashes and over-long sequences are flagged;
+- **adaptive keys** (urob's `zmk-adaptive-key` module): a key that sends something else
+  depending on the key typed just before it (and how recently), e.g. a Space that capitalises
+  the next sentence, a Shift that repeats the previous letter, Hands Down-style rolls, or
+  dead-key accents. Templates included;
 - macros that pause until the key is released, key toggle, key repeat, sticky keys and
   layers, combos limited to layers, caps word with a custom continue list.
+
+Creating a leader or adaptive key adds its module to `config/west.yml` (pinned to your ZMK
+release), and the Problems page warns when a keymap uses a module that isn't loaded.
 
 **Picking keys.** Categories, fuzzy search, a modifier row (`LC(LS(...))`), *Press a key*
 capture, one-shot and toggle variants, layer actions, Bluetooth profiles, output, RGB

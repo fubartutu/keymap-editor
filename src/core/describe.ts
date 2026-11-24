@@ -4,7 +4,7 @@ import { decompose } from './composer.ts'
 import type { DtsFile } from './dts.ts'
 import { keyLabel, type OsFlavour } from './keycodes.ts'
 import { resolveLayer, type Binding, type LayerInfo } from './keymap.ts'
-import { getMacros } from './features.ts'
+import { getAdaptiveKeys, getMacros } from './features.ts'
 
 export type LegendKind = 'key' | 'mod' | 'layer' | 'trans' | 'none' | 'mouse' | 'bt' | 'firmware' | 'light' | 'macro' | 'special' | 'unknown'
 
@@ -25,6 +25,8 @@ export interface Legend {
   /** What the key does with Shift (or other modifier) held: a mod-morph. */
   morph?: string
   morphMods?: string
+  /** The key is an adaptive key (output depends on the previous key). */
+  adaptive?: boolean
   kind: LegendKind
   /** Full description for tooltips. */
   title: string
@@ -90,6 +92,13 @@ export function describeSimple(b: Binding, ctx: DescribeCtx): Legend {
     case 'sys_reset': return { main: 'Reset', kind: 'firmware', title: 'Reset' }
     case 'soft_off': return { main: 'Off', kind: 'firmware', title: 'Soft off' }
     case 'studio_unlock': return { main: 'Studio', kind: 'firmware', title: 'Unlock ZMK Studio' }
+  }
+  if (def?.kind === 'leader') return { main: '★ Leader', kind: 'special', title: `Leader key &${b.behavior}: type a sequence after it` }
+  if (def?.kind === 'adaptive') {
+    const ak = getAdaptiveKeys(ctx.file).find((x) => x.label === b.behavior)
+    const d = ak?.defaultBindings[0] ? describeSimple(ak.defaultBindings[0], ctx) : undefined
+    const rules = ak?.triggers.map((t) => `after ${t.triggerKeys.join('/')}: ${t.bindings.map((x) => describeSimple(x, ctx).main).join('')}`).join('\n') ?? ''
+    return { main: (d ? (d.mods ?? '') + d.main : b.behavior), kind: d?.kind ?? 'special', adaptive: true, title: `Adaptive key &${b.behavior}\nNormally: ${d?.title ?? 'nothing'}\n${rules}` }
   }
   if (def?.kind === 'macro') {
     const m = getMacros(ctx.file).find((x) => x.label === b.behavior)

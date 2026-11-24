@@ -8,6 +8,10 @@ import { getCombos } from './features.ts'
 import { findKeycode, parseKeyExpr } from './keycodes.ts'
 import { getDefines, getLayers, layerDefines, resolveLayer, type Binding } from './keymap.ts'
 import type { Project } from './project.ts'
+import { getAdaptiveKeys, getLeaderKeys } from './features.ts'
+import { hasModule, KNOWN_MODULES } from './modules.ts'
+import { findKconfig } from './settings.ts'
+import { findByCompatible } from './keymap.ts'
 
 export interface Issue {
   severity: 'error' | 'warning' | 'info'
@@ -117,6 +121,50 @@ export function validateProject(p: Project): Issue[] {
       if (bad.length) issues.push({ severity: 'error', behavior: label, message: `&${label}: hold-trigger positions ${bad.join(', ')} don't exist.` })
     }
   })
+
+  // Behaviours from modules
+  for (const mod of KNOWN_MODULES) {
+    const used = findByCompatible(file, mod.compatible)
+    if (used.length && p.west && !hasModule(p.west.text, mod.id)) {
+      issues.push({ severity: 'error', behavior: used[0].labels[0], message: `&${used[0].labels[0]} needs the ${mod.id} module, which isn't in ${p.west.path}. Add it under Behaviours.` })
+    }
+  }
+  const kint = (sym: string, def: number) => Number(findKconfig(p.confs, sym)?.value ?? def)
+  const maxKeys = kint('ZMK_LEADER_MAX_KEYS_PER_SEQUENCE', 5)
+  const maxSeqs = kint('ZMK_LEADER_MAX_SEQUENCES', 32)
+  for (const l of getLeaderKeys(file)) {
+    if (l.sequences.length > maxSeqs) issues.push({ severity: 'error', behavior: l.label, message: `&${l.label} has ${l.sequences.length} sequences; the limit is ${maxSeqs} (raise CONFIG_ZMK_LEADER_MAX_SEQUENCES).` })
+    const seen = new Map<string, string>()
+    for (const s of l.sequences) {
+      const where = `&${l.label} sequence ${s.keys.join(' ')}`
+      if (!s.keys.length) issues.push({ severity: 'error', behavior: l.label, message: `&${l.label}: sequence ${s.id} is empty.` })
+      if (s.keys.length > maxKeys) issues.push({ severity: 'error', behavior: l.label, message: `${where}: ${s.keys.length} keys; the limit is ${maxKeys} (raise CONFIG_ZMK_LEADER_MAX_KEYS_PER_SEQUENCE).` })
+      if (!s.bindings.length) issues.push({ severity: 'error', behavior: l.label, message: `${where} does nothing.` })
+      const k = s.keys.join(' ')
+      if (seen.has(k)) issues.push({ severity: 'error', behavior: l.label, message: `&${l.label}: ${seen.get(k)} and ${s.id} have the same sequence ${k}.` })
+      seen.set(k, s.id)
+      for (const key of s.keys) if (!findKeycode(parseKeyExpr(key).key) && !allDefines.has(key)) issues.push({ severity: 'warning', behavior: l.label, message: `${where}: "${key}" is not a known keycode.` })
+      s.bindings.forEach((b) => checkBinding(b, { behavior: l.label }, where))
+    }
+    for (const a of l.sequences) for (const b of l.sequences) {
+      if (a !== b && b.keys.length > a.keys.length && a.keys.every((k, i) => b.keys[i] === k)) {
+        issues.push({ severity: 'warning', behavior: l.label, message: `&${l.label}: ${a.keys.join(' ')} is the start of ${b.keys.join(' ')}, so ${b.keys.join(' ')} can never be typed (nested sequences aren't supported).` })
+      }
+    }
+  }
+  const maxTriggers = kint('ZMK_ADAPTIVE_KEY_MAX_TRIGGER_CONDITIONS', 32)
+  const maxBindings = kint('ZMK_ADAPTIVE_KEY_MAX_BINDINGS', 4)
+  for (const a of getAdaptiveKeys(file)) {
+    if (a.triggers.length > maxTriggers) issues.push({ severity: 'error', behavior: a.label, message: `&${a.label} has ${a.triggers.length} rules; the limit is ${maxTriggers}.` })
+    a.defaultBindings.forEach((b) => checkBinding(b, { behavior: a.label }, `&${a.label}`))
+    for (const t of a.triggers) {
+      const where = `&${a.label}, after ${t.triggerKeys.join('/')}`
+      if (!t.triggerKeys.length) issues.push({ severity: 'error', behavior: a.label, message: `${where}: no trigger keys.` })
+      if (t.bindings.length > maxBindings) issues.push({ severity: 'error', behavior: a.label, message: `${where}: ${t.bindings.length} behaviours; the limit is ${maxBindings} (raise CONFIG_ZMK_ADAPTIVE_KEY_MAX_BINDINGS, or use a macro).` })
+      for (const key of [...t.triggerKeys, ...a.deadKeys]) if (!findKeycode(parseKeyExpr(key).key) && !allDefines.has(key)) issues.push({ severity: 'warning', behavior: a.label, message: `&${a.label}: "${key}" is not a known keycode.` })
+      t.bindings.forEach((b) => checkBinding(b, { behavior: a.label }, where))
+    }
+  }
 
   return issues
 }

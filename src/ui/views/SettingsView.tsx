@@ -10,7 +10,9 @@ export function SettingsView({ ctx, store }: { ctx: Ctx; store: Store }) {
   const p = ctx.project
   const f = p.files.features
   const [filter, setFilter] = useState('')
-  const applies = (s: Setting) => !s.requires || (s.requires === 'pmw3610' ? f.pmw3610 : s.requires === 'auto-mouse' ? f.autoMouse : s.requires === 'underglow' ? f.underglow : f.split)
+  const usesModule = (c: string) => ctx.reg.all.some((d) => d.compatible === c)
+  const applies = (s: Setting) => !s.requires || (s.requires === 'pmw3610' ? f.pmw3610 : s.requires === 'auto-mouse' ? f.autoMouse : s.requires === 'underglow' ? f.underglow
+    : s.requires === 'leader' ? usesModule('zmk,behavior-leader-key') : s.requires === 'adaptive' ? usesModule('zmk,behavior-adaptive-key') : f.split)
   const values = new Map(SETTINGS.map((s) => [s.id, readSetting(p, s)]))
   const visible = (s: Setting) => {
     if (!applies(s) || !values.get(s.id)!.available) return false

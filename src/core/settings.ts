@@ -31,7 +31,7 @@ export interface Setting {
   /** Only show when another setting has this value. */
   dependsOn?: { id: string; value: unknown }
   /** Only relevant when this feature is present (e.g. a PMW3610 trackball). */
-  requires?: 'pmw3610' | 'auto-mouse' | 'underglow' | 'split'
+  requires?: 'pmw3610' | 'auto-mouse' | 'underglow' | 'split' | 'leader' | 'adaptive'
   /** Oryx's equivalent setting, to help people coming from a ZSA keyboard. */
   oryx?: string
 }
@@ -49,6 +49,7 @@ export const SECTIONS: Section[] = [
   { id: 'trackball', title: 'Trackball', description: 'PMW3610 sensor settings (right half).' },
   { id: 'automouse', title: 'Auto-mouse', description: 'The mouse layer turns on by itself when the trackball moves, like the Voyager Navigator.' },
   { id: 'mousekeys', title: 'Mouse keys', description: 'Speed of the &mmv / &msc mouse-movement and scroll keys.' },
+  { id: 'modules', title: 'Leader & adaptive keys', description: 'Limits of the zmk-leader-key and zmk-adaptive-key modules.' },
   { id: 'studio', title: 'ZMK Studio', description: 'Live keymap editing over USB with ZMK Studio.' },
 ]
 
@@ -216,6 +217,20 @@ export const SETTINGS: Setting[] = [
     description: 'Time to reach top scroll speed.', oryx: 'Mousewheel time to max speed' },
   { id: 'msc-exp', section: 'mousekeys', title: 'Scroll key acceleration curve', type: 'number', min: 0, max: 5, default: 0, target: { kind: 'override', behavior: 'msc', prop: 'acceleration-exponent' },
     description: '0 scrolls at a constant speed; higher values speed up more sharply.' },
+
+  // Modules
+  { id: 'leader-keys', section: 'modules', title: 'Leader: longest sequence', type: 'number', min: 1, max: 16, default: 5, requires: 'leader', target: { kind: 'kconfig', symbol: 'ZMK_LEADER_MAX_KEYS_PER_SEQUENCE', scope: 'both' },
+    description: 'Most keys a leader sequence can have.' },
+  { id: 'leader-seqs', section: 'modules', title: 'Leader: sequences per leader key', type: 'number', min: 1, max: 256, default: 32, requires: 'leader', target: { kind: 'kconfig', symbol: 'ZMK_LEADER_MAX_SEQUENCES', scope: 'both' },
+    description: 'Most sequences one leader key can have. Raising it uses a little more memory.' },
+  { id: 'ak-triggers', section: 'modules', title: 'Adaptive: rules per key', type: 'number', min: 1, max: 256, default: 32, requires: 'adaptive', target: { kind: 'kconfig', symbol: 'ZMK_ADAPTIVE_KEY_MAX_TRIGGER_CONDITIONS', scope: 'both' },
+    description: 'Most "after key X" rules one adaptive key can have.' },
+  { id: 'ak-bindings', section: 'modules', title: 'Adaptive: keys sent per rule', type: 'number', min: 1, max: 16, default: 4, requires: 'adaptive', target: { kind: 'kconfig', symbol: 'ZMK_ADAPTIVE_KEY_MAX_BINDINGS', scope: 'both' },
+    description: 'Most behaviours one rule can send in a row (e.g. J then G → "jpg" sends 2). Use a macro for longer text.' },
+  { id: 'ak-tap', section: 'modules', title: 'Adaptive: key hold time', type: 'number', unit: ms, min: 1, max: 100, default: 5, requires: 'adaptive', target: { kind: 'kconfig', symbol: 'ZMK_ADAPTIVE_KEY_TAP_MS', scope: 'both' },
+    description: 'How long each key of a multi-key rule is held. Raise it if a remote desktop drops letters.' },
+  { id: 'ak-wait', section: 'modules', title: 'Adaptive: wait between keys', type: 'number', unit: ms, min: 1, max: 100, default: 5, requires: 'adaptive', target: { kind: 'kconfig', symbol: 'ZMK_ADAPTIVE_KEY_WAIT_MS', scope: 'both' },
+    description: 'Pause between the keys of a multi-key rule.' },
 
   // Studio
   { id: 'studio', section: 'studio', title: 'ZMK Studio', type: 'toggle', default: false, target: { kind: 'kconfig', symbol: 'ZMK_STUDIO', scope: 'central' },
