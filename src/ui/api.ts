@@ -11,7 +11,7 @@ async function call<T>(method: string, path: string, data?: unknown): Promise<T>
   return json as T
 }
 
-export interface ProjectResponse { files?: ProjectFiles; validator?: boolean; gh?: boolean; needsRepo?: boolean; suggestions?: string[] }
+export interface ProjectResponse { files?: ProjectFiles; validator?: boolean; validatorSupport?: { supported: boolean; reason?: string }; gh?: boolean; needsRepo?: boolean; suggestions?: string[] }
 export interface FirmwareCheck { available: boolean; ok?: boolean; errors?: string[]; layers?: Record<string, number>; stage?: string }
 export interface GitStatus { branch: string; ahead: number; behind: number; remote?: string; files: { status: string; path: string }[] }
 export interface Run { databaseId: number; status: string; conclusion: string; headSha: string; displayTitle: string; createdAt: string; updatedAt: string; url: string; headBranch: string; event: string }

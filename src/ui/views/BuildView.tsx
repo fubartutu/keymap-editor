@@ -88,15 +88,17 @@ export function BuildView({ ctx, store }: { ctx: Ctx; store: Store }) {
             <div className="row">
               <span className={`pill ${store.issues.some((i) => i.severity === 'error') ? 'err' : 'ok'}`}>{store.issues.filter((i) => i.severity === 'error').length} errors</span>
               <span className="pill">{store.issues.filter((i) => i.severity === 'warning').length} warnings</span>
-              {store.validator ? (
+              {store.validatorUnsupported ? (
+                <span className="small muted" style={{ maxWidth: 640 }}>{store.validatorUnsupported}</span>
+              ) : store.validator ? (
                 <button className="btn small" disabled={busy === 'check'} onClick={async () => { setBusy('check'); await store.checkFirmware().finally(() => setBusy(undefined)) }}>{busy === 'check' ? 'Checking…' : 'Run firmware check'}</button>
               ) : (
-                <button className="btn small" disabled={busy === 'setup'} onClick={async () => { setBusy('setup'); try { const r = await api.setupValidator(); store.setValidator(r.ok) } catch (e) { alert(String(e)) } finally { setBusy(undefined) } }}>{busy === 'setup' ? 'Downloading ZMK headers…' : 'Set up firmware check (≈15 MB)'}</button>
+                <button className="btn small" disabled={busy === 'setup'} onClick={async () => { setBusy('setup'); try { const r = await api.setupValidator(); store.setValidator(r.ok) } catch (e) { alert(e instanceof Error ? e.message : String(e)) } finally { setBusy(undefined) } }}>{busy === 'setup' ? 'Downloading ZMK headers…' : 'Set up firmware check (≈15 MB)'}</button>
               )}
               {store.firmwareCheck && (store.firmwareCheck.ok ? <span className="pill ok">firmware check passed: {Object.keys(store.firmwareCheck.layers ?? {}).length} layers × {ctx.project.files.layout.keys.length} keys</span> : <span className="pill err">firmware check failed</span>)}
             </div>
             {store.firmwareCheck && !store.firmwareCheck.ok && <pre className="code">{(store.firmwareCheck.errors ?? []).join('\n')}</pre>}
-            <p className="small muted" style={{ margin: 0 }}>The firmware check runs the C preprocessor with ZMK's real headers and Zephyr's devicetree parser, and counts every layer's bindings the way the build does. It catches most build failures in a second, without waiting for GitHub.</p>
+            {!store.validatorUnsupported && <p className="small muted" style={{ margin: 0 }}>The firmware check runs the C preprocessor with ZMK's real headers and Zephyr's devicetree parser, and counts every layer's bindings the way the build does. It catches most build failures in a second, without waiting for GitHub.</p>}
             {store.notes.length > 0 && <div className="banner">{store.notes.map((n) => <div key={n}>{n}</div>)}</div>}
           </div>
         </section>

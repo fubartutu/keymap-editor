@@ -23,7 +23,7 @@ export function App() {
   if (error) return <div className="page"><div className="banner err">Could not reach the editor server: {error}</div></div>
   if (!resp) return <div className="empty">Loading…</div>
   if (resp.needsRepo || !resp.files) return <RepoPicker suggestions={resp.suggestions ?? []} onPicked={load} />
-  return <Editor key={resp.files.root} files={resp.files} validator={!!resp.validator} gh={!!resp.gh} onReload={load} />
+  return <Editor key={resp.files.root} files={resp.files} validator={!!resp.validator} validatorUnsupported={resp.validatorSupport?.supported === false ? resp.validatorSupport.reason : undefined} gh={!!resp.gh} onReload={load} />
 }
 
 function RepoPicker({ suggestions, onPicked }: { suggestions: string[]; onPicked: () => void }) {
@@ -54,8 +54,8 @@ const NAV = [
   { id: 'issues', label: 'Problems', icon: '⚠' },
 ] as const
 
-function Editor({ files, validator, gh, onReload }: { files: ProjectFiles; validator: boolean; gh: boolean; onReload: () => void }) {
-  const store = useStore(files, validator, gh)
+function Editor({ files, validator, validatorUnsupported, gh, onReload }: { files: ProjectFiles; validator: boolean; validatorUnsupported?: string; gh: boolean; onReload: () => void }) {
+  const store = useStore(files, validator, gh, validatorUnsupported)
   const ctx = makeCtx(store.project)
   const [view, setView] = useState(() => location.hash.slice(1).split('/')[0] || 'layout')
   const [viewArg, setViewArg] = useState<string | undefined>(() => location.hash.slice(1).split('/')[1])

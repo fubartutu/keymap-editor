@@ -91,6 +91,17 @@ function validatorReady(): boolean {
 
 const PYTHON = platform() === 'win32' ? 'python' : 'python3'
 
+/** Can the firmware check run on this machine? It needs bash, git, the C preprocessor and Python. */
+async function validatorSupport(): Promise<{ supported: boolean; reason?: string }> {
+  if (platform() === 'win32') {
+    return { supported: false, reason: "The firmware check isn't available on Windows: it needs the C preprocessor, bash and Python, which Windows doesn't have. The live checks on the Problems page still run, and the GitHub build is the real test." }
+  }
+  const missing: string[] = []
+  for (const c of ['bash', 'git', 'cpp', PYTHON]) if (!(await hasCommand(c))) missing.push(c)
+  if (missing.length) return { supported: false, reason: `The firmware check needs ${missing.join(', ')}, which ${missing.length > 1 ? "aren't" : "isn't"} installed (cpp comes with gcc).` }
+  return { supported: true }
+}
+
 // ---------------------------------------------------------------------------
 // Bootloader drives (nice!nano shows up as a USB drive with INFO_UF2.TXT)
 
@@ -141,7 +152,8 @@ const routes: Record<string, Handler> = {
   'GET /api/project': async () => {
     if (!repoRoot) return { needsRepo: true, suggestions: [join(homedir(), 'Work', 'zmk-charybdis')].filter(isZmkConfig) }
     const files = detectProject(repoRoot)
-    return { files, validator: validatorReady(), gh: await hasCommand('gh') }
+    const support = await validatorSupport()
+    return { files, validator: support.supported && validatorReady(), validatorSupport: support, gh: await hasCommand('gh') }
   },
 
   'POST /api/repo': async (req) => {
@@ -169,7 +181,7 @@ const routes: Record<string, Handler> = {
 
   'POST /api/validate': async (req) => {
     const { keymap, keyCount } = await body(req)
-    if (!validatorReady()) return { available: false }
+    if (!validatorReady() || !(await validatorSupport()).supported) return { available: false }
     const root = requireRepo()
     const project = detectProject(root)
     const dir = await mkdtemp(join(tmpdir(), 'zmk-validate-'))
@@ -186,9 +198,15 @@ const routes: Record<string, Handler> = {
   },
 
   'POST /api/validator/setup': async () => {
+    const support = await validatorSupport()
+    if (!support.supported) throw new HttpError(400, support.reason!)
+    const output: string[] = []
     await new Promise<void>((ok, fail) => {
-      const p = spawn('bash', [join(HERE, 'setup-validator.sh')], { stdio: 'inherit' })
-      p.on('exit', (code) => (code === 0 ? ok() : fail(new HttpError(500, 'Validator setup failed; run server/setup-validator.sh in a terminal to see why'))))
+      const p = spawn('bash', [join(HERE, 'setup-validator.sh')], { stdio: ['ignore', 'pipe', 'pipe'] })
+      p.stdout.on('data', (d) => output.push(String(d)))
+      p.stderr.on('data', (d) => output.push(String(d)))
+      p.on('error', (e) => fail(new HttpError(500, `Couldn't run the setup script: ${e.message}`)))
+      p.on('exit', (code) => (code === 0 ? ok() : fail(new HttpError(500, `Validator setup failed:\n${output.join('').trim().slice(-1500)}`))))
     })
     return { ok: validatorReady() }
   },
@@ -333,7 +351,7 @@ async function main() {
   server.listen(PORT, '127.0.0.1', () => {
     console.log(`ZMK keymap editor: http://127.0.0.1:${PORT}`)
     console.log(repoRoot ? `Repository: ${repoRoot}` : 'No repository selected yet; pick one in the browser.')
-    if (!validatorReady()) console.log('Firmware validator not set up: run server/setup-validator.sh (optional).')
+    if (!validatorReady() && platform() !== 'win32') console.log('Firmware validator not set up: run server/setup-validator.sh (optional).')
   })
 }
 

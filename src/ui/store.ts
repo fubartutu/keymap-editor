@@ -23,13 +23,15 @@ export interface Store {
   checkFirmware: () => Promise<FirmwareCheck>
   revert: () => void
   validator: boolean
+  /** Why the firmware check can't run here, if it can't. */
+  validatorUnsupported?: string
   gh: boolean
   setValidator: (v: boolean) => void
 }
 
 const LIMIT = 200
 
-export function useStore(files: ProjectFiles, validator: boolean, gh: boolean): Store {
+export function useStore(files: ProjectFiles, validator: boolean, gh: boolean, validatorUnsupported?: string): Store {
   const [state, setState] = useState(() => ({ past: [] as { p: Project; label?: string }[], present: loadProject(files), future: [] as { p: Project; label?: string }[], label: undefined as string | undefined }))
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string>()
@@ -111,7 +113,7 @@ export function useStore(files: ProjectFiles, validator: boolean, gh: boolean): 
 
   return {
     project: state.present, apply, undo, redo, canUndo: state.past.length > 0, canRedo: state.future.length > 0, lastAction: state.label,
-    dirty, pending, notes, issues, save, saving, saveError, firmwareCheck, checkFirmware, revert, validator: validatorOn, gh, setValidator,
+    dirty, pending, notes, issues, save, saving, saveError, firmwareCheck, checkFirmware, revert, validator: validatorOn, validatorUnsupported, gh, setValidator,
   }
 }
 
