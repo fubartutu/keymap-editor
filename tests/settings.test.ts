@@ -1,14 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { existsSync } from 'node:fs'
-import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { printDts } from '../src/core/dts.ts'
 import { loadProject, serializeProject } from '../src/core/project.ts'
 import { SETTINGS } from '../src/core/settings.ts'
 import { readSetting, writeSetting } from '../src/core/settingsio.ts'
 import { detectProject } from '../server/project.ts'
+import { REPO } from './fixture.ts'
 
-const REPO = process.env.ZMK_CONFIG ?? join(homedir(), 'Work/zmk-charybdis')
 const get = (id: string) => SETTINGS.find((s) => s.id === id)!
 
 describe.skipIf(!existsSync(join(REPO, 'config')))('settings on the Charybdis config', () => {
@@ -19,20 +18,20 @@ describe.skipIf(!existsSync(join(REPO, 'config')))('settings on the Charybdis co
     expect(readSetting(p, get('cpi')).where).toBe('config/boards/shields/charybdis/charybdis_right.conf')
     expect(readSetting(p, get('orientation')).value).toBe('90')
     expect(readSetting(p, get('tx-power')).value).toBe('+8')
-    expect(readSetting(p, get('phy-2m')).value).toBe(false)
+    expect(readSetting(p, get('phy-2m')).value).toBe(true)
     expect(readSetting(p, get('name')).value).toBe('XI-MK1_2')
-    expect(readSetting(p, get('mt-flavor')).value).toBe('tap-preferred')
-    expect(readSetting(p, get('msc-speed')).value).toBe(25)
-    expect(readSetting(p, get('am-layer')).value).toBe(7)
-    expect(readSetting(p, get('am-timeout')).value).toBe(700)
-    expect(readSetting(p, get('scroll-layers')).value).toEqual([9])
-    expect(readSetting(p, get('sleep')).value).toBeUndefined()
+    expect(readSetting(p, get('mt-flavor')).value).toBeUndefined() // Miryoku uses its own u_mt, no &mt override
+    expect(readSetting(p, get('msc-speed')).value).toBe(100)
+    expect(readSetting(p, get('am-layer')).value).toBe(10)
+    expect(readSetting(p, get('am-timeout')).value).toBe(600)
+    expect(readSetting(p, get('scroll-layers')).value).toEqual([12])
+    expect(readSetting(p, get('sleep')).value).toBe(true)
   })
 
   it('writes Kconfig, choices, overrides, defines and overlay values', () => {
     let q = writeSetting(p, get('cpi'), 800)
     q = writeSetting(q, get('orientation'), '180')
-    q = writeSetting(q, get('sleep'), true)
+    q = writeSetting(q, get('sleep'), false)
     q = writeSetting(q, get('lt-term'), 250)
     q = writeSetting(q, get('mmv-speed'), 900)
     q = writeSetting(q, get('am-timeout'), 500)
@@ -41,12 +40,13 @@ describe.skipIf(!existsSync(join(REPO, 'config')))('settings on the Charybdis co
     expect(right).toContain('CONFIG_PMW3610_CPI=800')
     expect(right).toContain('CONFIG_PMW3610_ORIENTATION_180=y')
     expect(right).not.toContain('ORIENTATION_90')
-    expect(files['config/charybdis.conf']).toMatch(/CONFIG_ZMK_SLEEP=y\n$/)
+    expect(files['config/charybdis.conf']).toMatch(/\nCONFIG_ZMK_SLEEP=n\n?$/)
+    expect(files['config/charybdis.conf']).not.toContain('CONFIG_ZMK_SLEEP=y')
     const km = files['config/charybdis.keymap']
     expect(km).toMatch(/&lt \{[^}]*tapping-term-ms = <250>;/)
     // A pointing default must be defined before pointing.h is included.
     expect(km.indexOf('#define ZMK_POINTING_DEFAULT_MOVE_VAL 900')).toBeLessThan(km.indexOf('#include <dt-bindings/zmk/pointing.h>'))
-    expect(files['config/boards/shields/charybdis/charybdis_right.overlay']).toContain('input-processors = <&zip_auto_mouse 7 500>;')
+    expect(files['config/boards/shields/charybdis/charybdis_right.overlay']).toContain('input-processors = <&zip_auto_mouse 10 500>;')
   })
 
   it('resetting removes the line and empty overrides', () => {

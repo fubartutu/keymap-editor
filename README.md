@@ -135,7 +135,9 @@ npm run typecheck
 validation (`validate.ts`). `server/` holds the local API (file I/O, git, `gh`, flashing,
 firmware check). `src/ui` is the React app.
 
-Tests run against `~/Work/zmk-charybdis` when present (or `$ZMK_CONFIG`).
+Tests run against a pinned snapshot of `~/Work/zmk-charybdis` (`FIXTURE_REV` in
+`tests/fixture.ts`, extracted with `git archive`), so editing your keymap doesn't break them.
+They are skipped if that clone or commit isn't there. `$ZMK_CONFIG` points them at another directory.
 
 ## Limitations
 

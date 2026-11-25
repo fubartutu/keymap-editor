@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import { existsSync, readFileSync } from 'node:fs'
-import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { parseDts, printDts } from '../src/core/dts.ts'
 import { compose, decompose } from '../src/core/composer.ts'
@@ -12,8 +11,8 @@ import { getLayers, layerDefines } from '../src/core/keymap.ts'
 import { editKeymap, loadProject } from '../src/core/project.ts'
 import { validateProject } from '../src/core/validate.ts'
 import { detectProject } from '../server/project.ts'
+import { REPO } from './fixture.ts'
 
-const REPO = process.env.ZMK_CONFIG ?? join(homedir(), 'Work/zmk-charybdis')
 const has = existsSync(join(REPO, 'config'))
 const kp = (k: string) => ({ behavior: 'kp', params: [k] })
 const file = () => parseDts(`/ {\n    behaviors {\n    };\n    keymap {\n        compatible = "zmk,keymap";\n        l0 { bindings = <&kp A &kp B>; };\n    };\n};\n`)
@@ -76,10 +75,14 @@ describe.skipIf(!has)('on the Charybdis config', () => {
     const p = loadProject(detectProject(REPO))
     const q = editKeymap(p, (f) => { saveLeaderKey(f, { label: 'leader', name: 'L', ignoreKeys: [], sequences: [{ id: 'x', keys: ['A', 'B', 'C', 'D', 'E', 'F'], bindings: [kp('X')] }, { id: 'y', keys: ['A', 'B'], bindings: [kp('Y')] }] }) })
     const msgs = validateProject(q).map((i) => i.message).join('\n')
-    expect(msgs).toContain('needs the zmk-leader-key module')
     expect(msgs).toContain('the limit is 5')
     expect(msgs).toContain('A B is the start of A B C D E F')
-    const fixed = { ...q, west: { ...q.west!, text: addModule(q.west!.text, KNOWN_MODULES[0]) } }
+    // The config already loads zmk-leader-key; take it out to see the warning.
+    expect(msgs).not.toContain('needs the zmk-leader-key module')
+    const without = { ...q, west: { ...q.west!, text: q.west!.text.replace(/ *- name: zmk-leader-key\n(?: {6}.*\n)*/, '') } }
+    expect(hasModule(without.west.text, 'zmk-leader-key')).toBe(false)
+    expect(validateProject(without).map((i) => i.message).join('\n')).toContain('needs the zmk-leader-key module')
+    const fixed = { ...without, west: { ...without.west, text: addModule(without.west.text, KNOWN_MODULES[0]) } }
     expect(validateProject(fixed).map((i) => i.message).join('\n')).not.toContain('needs the zmk-leader-key module')
   })
 
@@ -92,6 +95,6 @@ describe.skipIf(!has)('on the Charybdis config', () => {
     const ctx = { file: f, reg, layers: getLayers(f), defines: layerDefines(f), os: 'linux' as const }
     expect(legend({ behavior: 'leader', params: [] }, ctx).main).toBe('★ Leader')
     expect(legend({ behavior: 'ak_comma', params: [] }, ctx)).toMatchObject({ main: ',', adaptive: true })
-    expect(readFileSync(join(REPO, 'config/west.yml'), 'utf8')).not.toContain('zmk-leader-key')
+    expect(readFileSync(join(REPO, 'config/west.yml'), 'utf8')).toContain('zmk-leader-key')
   })
 })

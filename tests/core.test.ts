@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import { existsSync, readFileSync } from 'node:fs'
-import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { parseDts, printDts } from '../src/core/dts.ts'
 import { formatBinding, getLayers, layerDefines, parseBindings } from '../src/core/keymap.ts'
@@ -11,8 +10,8 @@ import { validateProject } from '../src/core/validate.ts'
 import { findKconfig, setKconfig } from '../src/core/settings.ts'
 import { findOverlayProp, getAutoMouse } from '../src/core/overlay.ts'
 import { detectProject } from '../server/project.ts'
+import { REPO } from './fixture.ts'
 
-const REPO = process.env.ZMK_CONFIG ?? join(homedir(), 'Work/zmk-charybdis')
 const has = existsSync(join(REPO, 'config'))
 
 describe('dts', () => {
@@ -46,12 +45,12 @@ describe.skipIf(!has)('Charybdis config (zmk-charybdis)', () => {
 
   it('reads layers, defines, combos and macros', () => {
     const layers = getLayers(project.keymap)
-    expect(layers.map((l) => l.name)).toEqual(['base', 'Sym+Num', 'window', 'window2', 'gaming', 'mode', 'nav', 'mouse', 'mouse lock', 'scroll', 'snipe'])
+    expect(layers.map((l) => l.name)).toEqual(['Base', 'Extra', 'Tap', 'Button', 'Nav', 'Mouse', 'Media', 'Num', 'Sym', 'Fun', 'Ball', 'Ball lock', 'Scroll', 'Snipe'])
     for (const l of layers) expect(l.bindings).toHaveLength(56)
-    expect([...layerDefines(project.keymap)]).toEqual([['BASE', 0], ['SYM', 1], ['WIN', 2], ['WIN2', 3], ['GAME', 4], ['MODE', 5], ['NAV', 6], ['MOUSE', 7], ['MLOCK', 8], ['SCROLL', 9], ['SNIPE', 10]])
-    expect(getCombos(project.keymap).map((c) => c.id)).toEqual(['combo_undo', 'combo_cut', 'combo_copy', 'combo_paste', 'combo_tilde', 'combo_end_patient'])
-    const m = getMacros(project.keymap)[0]
-    expect(m.label).toBe('end_patient')
+    expect([...layerDefines(project.keymap)]).toEqual([['BASE', 0], ['EXTRA', 1], ['TAP', 2], ['BUTTON', 3], ['NAV', 4], ['MOUSE', 5], ['MEDIA', 6], ['NUM', 7], ['SYM', 8], ['FUN', 9], ['BALL', 10], ['BALL_LOCK', 11], ['SCROLL', 12], ['SNIPE', 13]])
+    expect(getCombos(project.keymap).map((c) => c.id)).toEqual(['combo_leader'])
+    const m = getMacros(project.keymap).find((x) => x.label === 'end_patient')!
+    expect(m).toBeDefined()
     expect(macroBindingsRaw(m.steps)).toBe('<&macro_tap &kp LC(F4)>, <&macro_wait_time 250>, <&macro_tap &kp LA(C)>')
   })
 
@@ -77,9 +76,9 @@ describe.skipIf(!has)('Charybdis config (zmk-charybdis)', () => {
 
   it('understands the custom hold-taps like Oryx steps', () => {
     const base = getLayers(project.keymap)[0].bindings
-    expect(decompose(base[25], project.keymap)).toEqual({ tap: { behavior: 'kp', params: ['A'] }, hold: { behavior: 'kp', params: ['LALT'] }, holdTap: 'hml' })
-    expect(decompose(base[49], project.keymap)).toEqual({ tap: { behavior: 'kp', params: ['BSPC'] }, hold: { behavior: 'mo', params: ['SYM'] }, holdTap: 'lt' })
-    expect(decompose(base[11], project.keymap)).toEqual({ tap: { behavior: 'kp', params: ['MINUS'] }, hold: { behavior: 'to', params: ['MODE'] }, holdTap: 'ht_to' })
+    expect(decompose(base[25], project.keymap)).toEqual({ tap: { behavior: 'kp', params: ['A'] }, hold: { behavior: 'kp', params: ['LGUI'] }, holdTap: 'u_mt' })
+    expect(decompose(base[49], project.keymap)).toEqual({ tap: { behavior: 'kp', params: ['BSPC'] }, hold: { behavior: 'mo', params: ['NUM'] }, holdTap: 'u_lt' })
+    expect(decompose(base[55], project.keymap)).toEqual({ tap: { behavior: 'kp', params: ['ESC'] }, hold: { behavior: 'mo', params: ['MEDIA'] }, holdTap: 'u_lt' })
   })
 
   it('adds a tap dance for a double tap, and cleans it up when removed', () => {
@@ -103,43 +102,44 @@ describe.skipIf(!has)('Charybdis config (zmk-charybdis)', () => {
   })
 
   it('moving a layer keeps defines, combos and the trackball overlay in step', () => {
-    // Move "gaming" (4) to the end.
-    const moved = projectMoveLayer(project, 4, 10)
+    // Move "Tap" (2) to the end.
+    const moved = projectMoveLayer(project, 2, 13)
     const names = getLayers(moved.keymap).map((l) => l.name)
-    expect(names[10]).toBe('gaming')
+    expect(names[13]).toBe('Tap')
     const defs = layerDefines(moved.keymap)
-    expect(defs.get('GAME')).toBe(10)
-    expect(defs.get('MOUSE')).toBe(6)
-    expect(defs.get('SCROLL')).toBe(8)
+    expect(defs.get('TAP')).toBe(13)
+    expect(defs.get('BALL')).toBe(9)
+    expect(defs.get('SCROLL')).toBe(11)
     // Bindings keep using the symbolic names.
-    expect(formatBinding(getLayers(moved.keymap)[0].bindings[49])).toBe('&lt SYM BSPC')
+    expect(formatBinding(getLayers(moved.keymap)[0].bindings[49])).toBe('&u_lt NUM BSPC')
     // Overlay numbers are remapped.
-    expect(findOverlayProp(moved.overlays, 'trackball', 'scroll-layers')?.cells).toEqual(['8'])
-    expect(findOverlayProp(moved.overlays, 'trackball', 'snipe-layers')?.cells).toEqual(['9'])
-    expect(getAutoMouse(moved.overlays)?.layer).toBe(6)
+    expect(findOverlayProp(moved.overlays, 'trackball', 'scroll-layers')?.cells).toEqual(['11'])
+    expect(findOverlayProp(moved.overlays, 'trackball', 'snipe-layers')?.cells).toEqual(['12'])
+    expect(getAutoMouse(moved.overlays)?.layer).toBe(9)
     // And the result still validates.
     expect(validateProject(moved).filter((i) => i.severity === 'error')).toEqual([])
     // Moving back restores the original text.
-    const back = projectMoveLayer(moved, 10, 4)
+    const back = projectMoveLayer(moved, 13, 2)
     expect(serializeProject(back).files).toEqual({})
   })
 
   it('adds and removes layers', () => {
     const added = projectAddLayer(project, 'Numpad')
     const layers = getLayers(added.keymap)
-    expect(layers).toHaveLength(12)
-    expect(layerDefines(added.keymap).get('NUMPAD')).toBe(11)
+    expect(layers).toHaveLength(15)
+    expect(layerDefines(added.keymap).get('NUMPAD')).toBe(14)
     expect(validateProject(added).filter((i) => i.severity === 'error')).toEqual([])
-    const removed = projectRemoveLayer(added, 11)
+    const removed = projectRemoveLayer(added, 14)
     expect(serializeProject(removed).files).toEqual({})
   })
 
   it('removing a layer turns references into &none and shifts later layers', () => {
-    const removed = projectRemoveLayer(project, 3) // window2, reached via &mo WIN2
-    const win = getLayers(removed.keymap)[2]
-    expect(win.bindings.some((b) => b.behavior === 'mo' && b.params[0] === 'WIN2')).toBe(false)
-    expect(layerDefines(removed.keymap).get('MOUSE')).toBe(6)
-    expect(getAutoMouse(removed.overlays)?.layer).toBe(6)
+    const removed = projectRemoveLayer(project, 11) // Ball lock, reached via &tog BALL_LOCK
+    const ball = getLayers(removed.keymap)[10]
+    expect(ball.bindings.some((b) => b.behavior === 'tog' && b.params[0] === 'BALL_LOCK')).toBe(false)
+    expect(layerDefines(removed.keymap).get('SCROLL')).toBe(11)
+    expect(findOverlayProp(removed.overlays, 'trackball', 'scroll-layers')?.cells).toEqual(['11'])
+    expect(getAutoMouse(removed.overlays)?.layer).toBe(10)
     expect(validateProject(removed).filter((i) => i.severity === 'error')).toEqual([])
   })
 
@@ -154,7 +154,7 @@ describe.skipIf(!has)('Charybdis config (zmk-charybdis)', () => {
 
   it('keeps auto-mouse excluded positions in sync with the mouse layer', () => {
     const p = editKeymap(project, (f) => {
-      const mouse = getLayers(f)[7]
+      const mouse = getLayers(f)[10] // Ball, the auto-mouse layer
       const bs = mouse.bindings.map((b) => ({ ...b }))
       bs[30] = { behavior: 'mkp', params: ['MB4'] }
       mouse.node.children.find((c) => c.kind === 'prop' && c.name === 'bindings')!
@@ -216,11 +216,11 @@ describe.skipIf(!has || !existsSync(join(REPO, 'tools/visualizer/server.py')))('
     const parsing = src.slice(0, src.indexOf('# --------------------------------------------------------------------------- hooks')).replace(/^import ctypes.*$/gm, '')
     const script = '__file__ = "x"\n' + parsing + '\nimport json,sys\nd = parse_keymap(sys.argv[1])\nprint(json.dumps({"layers": [[l["name"], len(l["bindings"])] for l in d["layers"]], "combos": len(d["combos"]), "holdTaps": sorted(d["holdTaps"]), "am": d["autoMouse"]}))\n'
     const res = JSON.parse(execFileSync('python3', ['-I', '-c', script, join(dir, 'config/charybdis.keymap')], { encoding: 'utf8' }))
-    expect(res.layers).toHaveLength(12)
+    expect(res.layers).toHaveLength(15)
     for (const [, n] of res.layers) expect(n).toBe(56)
-    expect(res.layers[11][0]).toBe('Numpad')
-    expect(res.combos).toBe(6)
-    expect(res.holdTaps).toEqual(expect.arrayContaining(['hml', 'hmr', 'ht', 'ht_to', 'ht_kp_caps_word']))
-    expect(res.am.layer).toBe(7)
+    expect(res.layers[14][0]).toBe('Numpad')
+    expect(res.combos).toBe(1)
+    expect(res.holdTaps).toEqual(expect.arrayContaining(['u_mt', 'u_lt', 'ht_kp_caps_word']))
+    expect(res.am.layer).toBe(10)
   })
 })
