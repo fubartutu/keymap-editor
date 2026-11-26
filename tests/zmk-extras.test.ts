@@ -72,3 +72,42 @@ describe('conditional layers', () => {
     expect(getConditionalLayers(f)).toEqual([{ id: 'tri_layer', ifLayers: ['1', '2'], thenLayer: '3' }])
   })
 })
+
+describe('clearing a step (the ✕) sticks', () => {
+  const none = { behavior: 'none', params: [] }
+  const clear = (steps: object, step: string) => {
+    const f = base()
+    const b = compose(steps, f)
+    const s = decompose(b, f)! as Record<string, unknown>
+    const out = compose({ ...s, [step]: undefined }, f)
+    return { f, out, back: decompose(out, f)! }
+  }
+
+  it('the tap of a hold-tap: the key keeps only its hold', () => {
+    const { f, out, back } = clear({ tap: kp('A'), hold: kp('LALT') }, 'tap')
+    expect(back.tap).toBeUndefined()
+    expect(back.hold).toEqual(kp('LALT'))
+    expect(formatBinding(out)).toBe('&ht_kp_none LALT 0')
+    expect(printDts(f)).toContain('flavor = "hold-preferred"')
+  })
+
+  it('a double tap that falls back to the tap because a tap-then-hold is set', () => {
+    // &td <&lt 1 BSPC>, <&mt BSPC BSPC>: the double tap reads as unset, so there's nothing to clear
+    const f = base()
+    const b = compose({ tap: kp('BSPC'), hold: { behavior: 'mo', params: ['1'] }, tapHold: kp('BSPC') }, f)
+    expect(printDts(f)).toContain('<&lt 1 BSPC>, <&mt BSPC BSPC>')
+    expect(decompose(b, f)).toMatchObject({ tap: kp('BSPC'), doubleTap: undefined, tapHold: kp('BSPC') })
+  })
+
+  it('the tap of a double-tap-only key keeps the double tap', () => {
+    const { back } = clear({ tap: none, doubleTap: { behavior: 'to', params: ['1'] } }, 'tap')
+    expect(back.tap).toBeUndefined()
+    expect(back.doubleTap).toEqual({ behavior: 'to', params: ['1'] })
+  })
+
+  it('the normal action of a mod-morph', () => {
+    const { back } = clear({ tap: { behavior: 'caps_word', params: [] }, morph: { binding: kp('CAPS'), mods: [], keepMods: [] } }, 'tap')
+    expect(back.tap).toBeUndefined()
+    expect(back.morph?.binding).toEqual(kp('CAPS'))
+  })
+})

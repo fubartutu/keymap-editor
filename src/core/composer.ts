@@ -92,12 +92,15 @@ function formatMods(mods: string[]): string {
   return mods.length === 1 ? `<${mods[0]}>` : `<(${mods.join('|')})>`
 }
 
+const isNone = (b: Binding | undefined) => b?.behavior === 'none'
+
 /** One tap count: a plain binding, or a hold-tap split into tap + hold. */
 function decomposeTap(b: Binding, reg: BehaviorRegistry): TapStep | null {
   const def = reg.get(b.behavior)
   if (def?.kind === 'hold-tap' && def.holdTapBindings) {
     const { hold, tap } = splitHoldTap(b, def, reg)
-    return { tap, hold, holdTap: def.id }
+    // A hold-tap that does nothing when tapped is a hold-only key (what clearing its tap makes).
+    return { tap: isNone(tap) ? undefined : tap, hold, holdTap: def.id }
   }
   // Nested tap dances and mod-morphs can't be shown as steps.
   if (def && !def.builtin && (def.kind === 'tap-dance' || def.kind === 'mod-morph')) return null
@@ -116,6 +119,8 @@ export function decompose(b: Binding, file: DtsFile, reg = buildRegistry(file)):
     const alt = decomposeTap(inner[1], reg)
     // The morphed binding must be a single action (not itself a hold-tap).
     if (!base || base.morph || !alt || alt.hold) return null
+    // Inside a mod-morph, &none as the normal action means it has none (as compose writes it).
+    if (isNone(base.tap) && !base.hold) delete base.tap
     return { ...base, morph: { binding: alt.tap!, mods: modsOf(getRaw(node, 'mods')), keepMods: modsOf(getRaw(node, 'keep-mods')) }, modMorph: def.id }
   }
 
@@ -125,13 +130,19 @@ export function decompose(b: Binding, file: DtsFile, reg = buildRegistry(file)):
     const taps = inner.map((x) => decomposeTap(x, reg))
     if (taps.some((t) => !t)) return null
     const [first, second, ...rest] = taps as TapStep[]
-    const steps: KeySteps = { tap: first.tap, hold: first.hold, holdTap: first.holdTap, tapDance: def.id }
+    // A single tap of &none means "nothing on one tap" (e.g. Miryoku's double-tap layer locks).
+    const tap = isNone(first.tap) && !first.hold ? undefined : first.tap
+    // compose fills an unset tap of a later tap count that has a hold with the single tap, so
+    // report that tap as unset - otherwise clearing it changes nothing.
+    const sameAsTap = (t: TapStep) => (t.hold && t.tap && tap && bindingEquals(t.tap, tap) ? { ...t, tap: undefined } : t)
+    const steps: KeySteps = { tap, hold: first.hold, holdTap: first.holdTap, tapDance: def.id }
     if (second) {
-      steps.doubleTap = second.tap
-      steps.tapHold = second.hold
-      steps.secondHoldTap = second.holdTap
+      const s2 = sameAsTap(second)
+      steps.doubleTap = s2.tap
+      steps.tapHold = s2.hold
+      steps.secondHoldTap = s2.holdTap
     }
-    if (rest.length) steps.moreTaps = rest
+    if (rest.length) steps.moreTaps = rest.map(sameAsTap)
     return steps
   }
 
@@ -170,15 +181,17 @@ function makeHoldTap(file: DtsFile, hold: Binding, tap: Binding, preferred: stri
   }
   if (!chosen) {
     chosen = createHoldTap(file, `ht_${hold.behavior}_${tap.behavior}`, hold.behavior, tap.behavior,
-      { flavor: '"tap-preferred"', 'tapping-term-ms': '<200>' }, `${GENERATED_MARK}: hold ${hold.behavior}, tap ${tap.behavior}`)
+      { flavor: tap.behavior === 'none' ? '"hold-preferred"' : '"tap-preferred"', 'tapping-term-ms': '<200>' }, `${GENERATED_MARK}: hold ${hold.behavior}, tap ${tap.behavior}`)
   }
   return { behavior: chosen, params: [hold.params[0] ?? '0', tap.params[0] ?? '0'] }
 }
 
 function composeTap(file: DtsFile, t: TapStep, fallbackTap?: Binding): Binding {
   const tap = t.tap ?? fallbackTap
-  if (tap && t.hold) return makeHoldTap(file, t.hold, tap, t.holdTap)
-  return tap ?? t.hold ?? { behavior: 'none', params: [] }
+  // Hold only: a hold-tap that does nothing when tapped. (A bare &kp LALT would still send
+  // Alt on a tap, and would read back as "when tapped", so clearing the tap wouldn't stick.)
+  if (t.hold) return makeHoldTap(file, t.hold, tap ?? { behavior: 'none', params: [] }, t.holdTap)
+  return tap ?? { behavior: 'none', params: [] }
 }
 
 function sameBindings(a: Binding[] | undefined, b: Binding[]): boolean {
@@ -209,7 +222,8 @@ function placeBehaviour(file: DtsFile, kind: 'tap-dance' | 'mod-morph', bindings
  * `file` when needed. `file` is mutated.
  */
 export function compose(steps: KeySteps, file: DtsFile): Binding {
-  if (!steps.tap && !steps.hold && !steps.morph) return { behavior: 'none', params: [] }
+  const more0 = (steps.moreTaps ?? []).some((t) => t.tap || t.hold)
+  if (!steps.tap && !steps.hold && !steps.morph && !steps.doubleTap && !steps.tapHold && !more0) return { behavior: 'none', params: [] }
   const first = composeTap(file, { tap: steps.tap, hold: steps.hold, holdTap: steps.holdTap })
 
   let base: Binding = first

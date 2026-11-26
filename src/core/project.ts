@@ -126,13 +126,28 @@ export function setKeyMeta(p: Project, layerId: string, pos: number, km: KeyMeta
 // ---------------------------------------------------------------------------
 // Saving
 
-/** Bindings on the auto-mouse layer that do something (so moving the ball shouldn't cancel the layer when they're pressed). */
+const MODIFIER = /^(L|R|LEFT_|RIGHT_)(SHIFT|SHFT|CTRL|CTL|CONTROL|ALT|GUI|WIN|CMD|COMMAND|META|OPT|OPTION)$/
+
+/** A plain modifier key (&kp LCTRL, &sk LSHFT…): something you hold while clicking. */
+function isModifierKey(b: Binding | undefined): boolean {
+  return !!b && (b.behavior === 'kp' || b.behavior === 'sk') && MODIFIER.test(b.params[0] ?? '')
+}
+
+/**
+ * Positions that shouldn't cancel the auto-mouse layer when pressed: the keys that do something
+ * on it, plus transparent ones already listed where a plain modifier shows through from the
+ * base layer (kept so ctrl-click and shift-click keep working while the ball moves; never added).
+ */
 export function autoMouseExcluded(p: Project): number[] | undefined {
   const am = getAutoMouse(p.overlays)
   if (!am || am.layer === undefined) return undefined
-  const layer = getLayers(p.keymap)[am.layer]
+  const layers = getLayers(p.keymap)
+  const layer = layers[am.layer]
   if (!layer) return undefined
-  return layer.bindings.map((b: Binding, i) => (b.behavior !== 'trans' ? i : -1)).filter((i) => i >= 0)
+  const base = am.layer > 0 ? layers[0]?.bindings : undefined
+  return layer.bindings
+    .map((b: Binding, i) => (b.behavior !== 'trans' || (am.excluded.includes(i) && isModifierKey(base?.[i])) ? i : -1))
+    .filter((i) => i >= 0)
 }
 
 export interface SaveResult {
