@@ -207,6 +207,7 @@ export function KeyEditor({ ctx, store, layer, pos, onNewMacro, onOpenBehaviour 
                 <label className="check small" title="Normally the modifier is removed before sending the alternative (so Shift+, sends a plain ;). Keep it to send e.g. Shift+Delete."><input type="checkbox" disabled={!steps.morph} checked={!!steps.morph?.keepMods.length} onChange={(e) => steps.morph && update({ ...steps, morph: { ...steps.morph, keepMods: e.target.checked ? steps.morph.mods : [] } }, 'Mod-morph keep modifiers')} /> keep the modifier held</label>
               </div>
             )}
+            {step === 'tapHold' && <p className="small muted" style={{ marginTop: 0 }}>Set this to the tapped key to make tap-then-hold repeat it: that uses the hold-tap's quick tap (quick-tap-ms), not a tap dance, so fast repeated taps all register. Anything else needs a tap dance, which waits after each tap.</p>}
             {step.startsWith('t') && step !== 'tap' && step !== 'tapHold' && <p className="small muted" style={{ marginTop: 0 }}>Tap the key {ordinal(Number(step.slice(1)))} quickly. Each extra tap waits for the tap-dance timing before it sends, so keep many-tap keys off letters you type fast.</p>}
             <Picker
               key={`${layer}-${pos}-${step}`}

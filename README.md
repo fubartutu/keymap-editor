@@ -49,6 +49,7 @@ they fit:
 | tap + hold modifier | `&mt LSHFT A`, or your own hold-tap (e.g. home-row mods `&hml LALT A`) |
 | tap + hold layer | `&lt NAV SPACE` |
 | tap + hold anything else | a hold-tap with matching bindings, created if needed (e.g. `<&to>, <&kp>`) |
+| + tap-then-hold = the tap (key repeat) | the hold-tap with `quick-tap-ms` (e.g. `&u_lt_rep NUM BSPC`), no tap dance, so fast taps all register |
 | + double tap / tap-then-hold | a tap dance whose bindings are the above |
 | + 3rd, 4th… tap (each may have a hold) | a longer tap dance (ZMK only: Oryx stops at two taps) |
 | + "When Shift is held" (or Ctrl/Alt/Gui) | a mod-morph wrapping all of the above (ZMK only) |

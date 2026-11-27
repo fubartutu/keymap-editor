@@ -92,11 +92,12 @@ describe('clearing a step (the ✕) sticks', () => {
   })
 
   it('a double tap that falls back to the tap because a tap-then-hold is set', () => {
-    // &td <&lt 1 BSPC>, <&mt BSPC BSPC>: the double tap reads as unset, so there's nothing to clear
-    const f = base()
-    const b = compose({ tap: kp('BSPC'), hold: { behavior: 'mo', params: ['1'] }, tapHold: kp('BSPC') }, f)
-    expect(printDts(f)).toContain('<&lt 1 BSPC>, <&mt BSPC BSPC>')
-    expect(decompose(b, f)).toMatchObject({ tap: kp('BSPC'), doubleTap: undefined, tapHold: kp('BSPC') })
+    // &td <&lt 1 BSPC>, <&mt BSPC BSPC> (older keymaps): the double tap reads as unset, so
+    // there's nothing to clear - and saving the key turns it into a quick-tap hold-tap.
+    const f = parseDts(`/ {\n    behaviors {\n        td_bspc: td_bspc {\n            compatible = "zmk,behavior-tap-dance";\n            #binding-cells = <0>;\n            bindings = <&lt 1 BSPC>, <&mt BSPC BSPC>;\n        };\n    };\n    keymap {\n        compatible = "zmk,keymap";\n        l0 { bindings = <&td_bspc &kp B>; };\n        l1 { bindings = <&trans &trans>; };\n    };\n};\n`)
+    const steps = decompose({ behavior: 'td_bspc', params: [] }, f)!
+    expect(steps).toMatchObject({ tap: kp('BSPC'), doubleTap: undefined, tapHold: kp('BSPC') })
+    expect(formatBinding(compose(steps, f))).toBe('&lt_rep 1 BSPC')
   })
 
   it('the tap of a double-tap-only key keeps the double tap', () => {
@@ -109,5 +110,61 @@ describe('clearing a step (the ✕) sticks', () => {
     const { back } = clear({ tap: { behavior: 'caps_word', params: [] }, morph: { binding: kp('CAPS'), mods: [], keepMods: [] } }, 'tap')
     expect(back.tap).toBeUndefined()
     expect(back.morph?.binding).toEqual(kp('CAPS'))
+  })
+})
+
+describe('tap then hold repeats the tap (quick-tap-ms, not a tap dance)', () => {
+  const mo1 = { behavior: 'mo', params: ['1'] }
+  const withULt = (extra = '') => parseDts(`/ {\n    behaviors {\n        u_lt: u_lt {\n            compatible = "zmk,behavior-hold-tap";\n            #binding-cells = <2>;\n            bindings = <&mo>, <&kp>;\n            flavor = "tap-preferred";\n            tapping-term-ms = <180>;\n        };\n${extra}    };\n    keymap {\n        compatible = "zmk,keymap";\n        l0 { bindings = <&u_lt 1 BSPC &kp B>; };\n        l1 { bindings = <&trans &trans>; };\n    };\n};\n`)
+
+  it('gives the key a quick-tap variant of its own hold-tap, with the same timing', () => {
+    const f = withULt()
+    const b = compose({ tap: kp('BSPC'), hold: mo1, holdTap: 'u_lt', tapHold: kp('BSPC') }, f)
+    expect(formatBinding(b)).toBe('&u_lt_rep 1 BSPC')
+    const text = printDts(f)
+    expect(text).not.toContain('zmk,behavior-tap-dance')
+    expect(text).toMatch(/u_lt_rep: u_lt_rep \{[^}]*flavor = "tap-preferred";[^}]*tapping-term-ms = <180>;[^}]*quick-tap-ms = <200>;/)
+    expect(decompose(b, f)).toEqual({ tap: kp('BSPC'), hold: mo1, holdTap: 'u_lt_rep', tapHold: kp('BSPC') })
+    expect(formatBinding(compose(decompose(b, f)!, structuredClone(f)))).toBe('&u_lt_rep 1 BSPC')
+  })
+
+  it('treats a double tap that is just the tap again the same way (it used to drop presses)', () => {
+    const f = withULt()
+    const b = compose({ tap: kp('BSPC'), hold: mo1, holdTap: 'u_lt', doubleTap: kp('BSPC'), tapHold: kp('BSPC'), secondHoldTap: 'mt' }, f)
+    expect(formatBinding(b)).toBe('&u_lt_rep 1 BSPC')
+    expect(printDts(f)).not.toContain('zmk,behavior-tap-dance')
+  })
+
+  it('reuses an existing quick-tap hold-tap, and goes back to the plain one when the step is removed', () => {
+    const f = withULt()
+    const one = compose({ tap: kp('BSPC'), hold: mo1, holdTap: 'u_lt', tapHold: kp('BSPC') }, f)
+    const two = compose({ tap: kp('SPACE'), hold: mo1, holdTap: 'u_lt', tapHold: kp('SPACE') }, f)
+    expect([one.behavior, two.behavior]).toEqual(['u_lt_rep', 'u_lt_rep'])
+    expect(printDts(f).match(/quick-tap-ms/g)).toHaveLength(1)
+    const back = compose({ ...decompose(one, f)!, tapHold: undefined }, f)
+    expect(formatBinding(back)).toBe('&u_lt 1 BSPC')
+  })
+
+  it('makes one from the built-in layer-tap when there is no custom hold-tap', () => {
+    const f = base()
+    const b = compose({ tap: kp('SPACE'), hold: mo1, tapHold: kp('SPACE') }, f)
+    expect(formatBinding(b)).toBe('&lt_rep 1 SPACE')
+    expect(printDts(f)).toMatch(/lt_rep: lt_rep \{[^}]*bindings = <&mo>, <&kp>;[^}]*flavor = "tap-preferred";[^}]*tapping-term-ms = <200>;[^}]*quick-tap-ms = <200>;/)
+  })
+
+  it('keeps a hand-written quick-tap hold-tap as it is', () => {
+    const f = withULt(`        hml: hml {\n            compatible = "zmk,behavior-hold-tap";\n            #binding-cells = <2>;\n            bindings = <&kp>, <&kp>;\n            flavor = "balanced";\n            tapping-term-ms = <280>;\n            quick-tap-ms = <175>;\n        };\n`)
+    const b = { behavior: 'hml', params: ['LALT', 'A'] }
+    const steps = decompose(b, f)!
+    expect(steps.tapHold).toEqual(kp('A'))
+    const g = structuredClone(f)
+    expect(formatBinding(compose(steps, g))).toBe('&hml LALT A')
+    expect(printDts(g)).toBe(printDts(f))
+  })
+
+  it('still uses a tap dance when tap then hold does something else', () => {
+    const f = withULt()
+    const b = compose({ tap: kp('BSPC'), hold: mo1, holdTap: 'u_lt', tapHold: kp('DEL') }, f)
+    expect(b.behavior).toMatch(/^td_/)
   })
 })

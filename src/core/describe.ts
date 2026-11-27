@@ -3,7 +3,7 @@ import { MOUSE_BUTTONS, MOUSE_MOVES, SCROLLS, type BehaviorRegistry } from './be
 import { decompose } from './composer.ts'
 import type { DtsFile } from './dts.ts'
 import { keyLabel, type OsFlavour } from './keycodes.ts'
-import { resolveLayer, type Binding, type LayerInfo } from './keymap.ts'
+import { bindingEquals, resolveLayer, type Binding, type LayerInfo } from './keymap.ts'
 import { getAdaptiveKeys, getMacros } from './features.ts'
 
 export type LegendKind = 'key' | 'mod' | 'layer' | 'trans' | 'none' | 'mouse' | 'bt' | 'firmware' | 'light' | 'macro' | 'special' | 'unknown'
@@ -129,17 +129,19 @@ export function describe(b: Binding, ctx: DescribeCtx): Legend {
     legend.doubleTap = (d.mods ?? '') + d.main
     legend.title += `\nDouble tap: ${d.title}`
   }
+  // Tap then hold repeating the tap (quick-tap-ms) isn't a second action: keep it off the legend.
+  const repeats = !!steps.tapHold && !!steps.tap && bindingEquals(steps.tapHold, steps.tap) && !steps.doubleTap && !steps.moreTaps?.length
   if (steps.tapHold) {
     const t = describeSimple(steps.tapHold, ctx)
-    legend.tapHold = (t.mods ?? '') + t.main
-    legend.title += `\nTap then hold: ${t.title}`
+    if (!repeats) legend.tapHold = (t.mods ?? '') + t.main
+    legend.title += repeats ? `\nTap then hold: repeats ${t.title}` : `\nTap then hold: ${t.title}`
   }
   steps.moreTaps?.forEach((t, i) => {
     const n = i + 3
     if (t.tap) legend.title += `\n${n} taps: ${describeSimple(t.tap, ctx).title}`
     if (t.hold) legend.title += `\n${n} taps then hold: ${describeSimple(t.hold, ctx).title}`
   })
-  if (steps.doubleTap || steps.tapHold || steps.moreTaps?.length) legend.taps = 2 + (steps.moreTaps?.length ?? 0)
+  if (steps.doubleTap || (steps.tapHold && !repeats) || steps.moreTaps?.length) legend.taps = 2 + (steps.moreTaps?.length ?? 0)
   if (steps.morph) {
     const m = describeSimple(steps.morph.binding, ctx)
     legend.morph = (m.mods ?? '') + m.main

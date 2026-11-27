@@ -11,6 +11,9 @@
  * Compilation:
  *   tap                         → the tap binding itself        (&kp A)
  *   tap + hold                  → a hold-tap                     (&mt LSHFT A, &lt NAV SPC, &hml LALT A…)
+ *   tap + hold + tap-then-hold  → a hold-tap with quick-tap-ms, when tap-then-hold repeats
+ *                                 the tap (and any double tap is the tap again): no tap dance,
+ *                                 so fast repeated taps all register
  *   2+ taps                     → a tap dance whose bindings are the above, one per tap count
  *   + "with modifier"           → a mod-morph wrapping all of that
  *
@@ -18,8 +21,8 @@
  * was written by hand gives back the same binding.
  */
 import { buildRegistry, type BehaviorDef, type BehaviorRegistry } from './behaviors.ts'
-import { getRaw, parseCells, parseString, setProp, walkNodes, type DtsFile, type DtsNode } from './dts.ts'
-import { createHoldTap, createTapDance, createModMorph, behaviorUsage, behaviorNode } from './features.ts'
+import { getRaw, parseCells, parseString, props, setProp, walkNodes, type DtsFile, type DtsNode } from './dts.ts'
+import { createHoldTap, createTapDance, createModMorph, behaviorUsage, behaviorNode, overrideNode, BUILTIN_DEFAULTS } from './features.ts'
 import { bindingEquals, formatBindingGroups, parseBindings, type Binding } from './keymap.ts'
 
 /** What one tap count does: tapped, and optionally held. */
@@ -59,6 +62,8 @@ export interface KeySteps {
 }
 
 export const GENERATED_MARK = 'keymap-editor: generated'
+/** quick-tap-ms given to hold-taps the editor creates for "tap then hold repeats". */
+export const REPEAT_QUICK_TAP_MS = 200
 export const SHIFT_MODS = ['MOD_LSFT', 'MOD_RSFT']
 
 export class ComposeError extends Error {}
@@ -148,7 +153,32 @@ export function decompose(b: Binding, file: DtsFile, reg = buildRegistry(file)):
 
   const t = decomposeTap(b, reg)
   if (!t) return null
-  return { tap: t.tap, hold: t.hold, holdTap: t.holdTap }
+  const steps: KeySteps = { tap: t.tap, hold: t.hold, holdTap: t.holdTap }
+  // A hold-tap with quick-tap-ms repeats the tap when tapped then held.
+  if (t.hold && t.holdTap && quickTapMs(file, t.holdTap) > 0) steps.tapHold = t.tap
+  return steps
+}
+
+/** quick-tap-ms of a hold-tap: its own node, or the `&lt { }` style override of a built-in. */
+export function quickTapMs(file: DtsFile, id: string): number {
+  const node = behaviorNode(file, id) ?? overrideNode(file, id, false)
+  const raw = node ? getRaw(node, 'quick-tap-ms') : undefined
+  if (raw == null) return Number(BUILTIN_DEFAULTS[id]?.['quick-tap-ms'] ?? 0)
+  return Number(parseCells(raw)[0]) || 0
+}
+
+/** The properties of hold-tap `id` (minus its bindings), for making a variant of it. */
+function holdTapProps(file: DtsFile, id: string): Record<string, string | null> {
+  const out: Record<string, string | null> = {}
+  const own = behaviorNode(file, id)
+  if (own) {
+    for (const p of props(own.children)) if (!['compatible', '#binding-cells', 'bindings'].includes(p.name)) out[p.name] = p.raw
+    return out
+  }
+  for (const [k, v] of Object.entries(BUILTIN_DEFAULTS[id] ?? {})) out[k] = typeof v === 'string' ? `"${v}"` : `<${v}>`
+  const ov = overrideNode(file, id, false)
+  if (ov) for (const p of props(ov.children)) out[p.name] = p.raw
+  return out
 }
 
 function holdTapCandidates(reg: BehaviorRegistry, holdBeh: string, tapBeh: string): BehaviorDef[] {
@@ -168,30 +198,58 @@ function checkPassable(b: Binding, role: string, reg: BehaviorRegistry) {
   }
 }
 
-function makeHoldTap(file: DtsFile, hold: Binding, tap: Binding, preferred: string | undefined): Binding {
+/**
+ * `quick`: true needs a hold-tap with quick-tap-ms (tap then hold repeats the tap), false one
+ * without, undefined either. When the preferred hold-tap doesn't fit, a variant of it is reused
+ * or created with only quick-tap-ms changed, so its timing and flavour carry over.
+ */
+function makeHoldTap(file: DtsFile, hold: Binding, tap: Binding, preferred: string | undefined, quick?: boolean): Binding {
   const reg = buildRegistry(file)
   checkPassable(hold, 'hold', reg)
   checkPassable(tap, 'tap', reg)
+  const fits = (id: string) => quick === undefined || (quickTapMs(file, id) > 0) === quick
   const candidates = holdTapCandidates(reg, hold.behavior, tap.behavior)
-  let chosen = candidates.find((c) => c.id === preferred)?.id
-  if (!chosen) {
-    if (hold.behavior === 'kp' && tap.behavior === 'kp' && candidates.some((c) => c.id === 'mt')) chosen = 'mt'
-    else if (hold.behavior === 'mo' && tap.behavior === 'kp') chosen = 'lt'
-    else chosen = candidates[0]?.id
+  const params = [hold.params[0] ?? '0', tap.params[0] ?? '0']
+  let base = candidates.find((c) => c.id === preferred)?.id
+  if (!base) {
+    if (hold.behavior === 'kp' && tap.behavior === 'kp' && candidates.some((c) => c.id === 'mt')) base = 'mt'
+    else if (hold.behavior === 'mo' && tap.behavior === 'kp') base = 'lt'
+    else base = candidates[0]?.id
   }
-  if (!chosen) {
-    chosen = createHoldTap(file, `ht_${hold.behavior}_${tap.behavior}`, hold.behavior, tap.behavior,
-      { flavor: tap.behavior === 'none' ? '"hold-preferred"' : '"tap-preferred"', 'tapping-term-ms': '<200>' }, `${GENERATED_MARK}: hold ${hold.behavior}, tap ${tap.behavior}`)
+  if (base && fits(base)) return { behavior: base, params }
+
+  const wanted = base ? holdTapProps(file, base) : { flavor: tap.behavior === 'none' ? '"hold-preferred"' : '"tap-preferred"', 'tapping-term-ms': '<200>' }
+  if (quick) wanted['quick-tap-ms'] = `<${REPEAT_QUICK_TAP_MS}>`
+  else delete wanted['quick-tap-ms']
+  const same = (id: string) => {
+    if (!fits(id)) return false
+    const have = holdTapProps(file, id)
+    const norm = (r: Record<string, string | null>) => JSON.stringify(Object.entries(r).filter(([k]) => k !== 'quick-tap-ms').sort())
+    return norm(have) === norm(wanted)
   }
-  return { behavior: chosen, params: [hold.params[0] ?? '0', tap.params[0] ?? '0'] }
+  const reuse = candidates.find((c) => same(c.id))?.id
+  if (reuse) return { behavior: reuse, params }
+
+  const label = base ? `${base.replace(/_rep$/, '')}${quick ? '_rep' : ''}` : `ht_${hold.behavior}_${tap.behavior}`
+  const why = quick ? 'tap then hold repeats the tap' : `hold ${hold.behavior}, tap ${tap.behavior}`
+  return { behavior: createHoldTap(file, label, hold.behavior, tap.behavior, wanted, `${GENERATED_MARK}: ${why}`), params }
 }
 
-function composeTap(file: DtsFile, t: TapStep, fallbackTap?: Binding): Binding {
+function composeTap(file: DtsFile, t: TapStep, fallbackTap?: Binding, quick?: boolean): Binding {
   const tap = t.tap ?? fallbackTap
   // Hold only: a hold-tap that does nothing when tapped. (A bare &kp LALT would still send
   // Alt on a tap, and would read back as "when tapped", so clearing the tap wouldn't stick.)
-  if (t.hold) return makeHoldTap(file, t.hold, tap ?? { behavior: 'none', params: [] }, t.holdTap)
+  if (t.hold) return makeHoldTap(file, t.hold, tap ?? { behavior: 'none', params: [] }, t.holdTap, quick)
   return tap ?? { behavior: 'none', params: [] }
+}
+
+/**
+ * Tap then hold repeats the tap, and nothing else needs a second tap: ZMK does that with
+ * quick-tap-ms on the hold-tap, without a tap dance (which would swallow fast repeated taps).
+ */
+function isRepeat(steps: KeySteps, more: TapStep[]): boolean {
+  const tap = steps.tap
+  return !!tap && !!steps.tapHold && bindingEquals(steps.tapHold, tap) && (!steps.doubleTap || bindingEquals(steps.doubleTap, tap)) && !more.length
 }
 
 function sameBindings(a: Binding[] | undefined, b: Binding[]): boolean {
@@ -222,13 +280,15 @@ function placeBehaviour(file: DtsFile, kind: 'tap-dance' | 'mod-morph', bindings
  * `file` when needed. `file` is mutated.
  */
 export function compose(steps: KeySteps, file: DtsFile): Binding {
-  const more0 = (steps.moreTaps ?? []).some((t) => t.tap || t.hold)
-  if (!steps.tap && !steps.hold && !steps.morph && !steps.doubleTap && !steps.tapHold && !more0) return { behavior: 'none', params: [] }
-  const first = composeTap(file, { tap: steps.tap, hold: steps.hold, holdTap: steps.holdTap })
+  const more = (steps.moreTaps ?? []).filter((t) => t.tap || t.hold)
+  if (!steps.tap && !steps.hold && !steps.morph && !steps.doubleTap && !steps.tapHold && !more.length) return { behavior: 'none', params: [] }
+  const repeat = isRepeat(steps, more)
+  const multiTap = !repeat && !!(steps.doubleTap || steps.tapHold || more.length)
+  // Top level: quick-tap-ms exactly when tap-then-hold repeats. Inside a tap dance it doesn't matter.
+  const first = composeTap(file, { tap: steps.tap, hold: steps.hold, holdTap: steps.holdTap }, undefined, multiTap ? undefined : repeat)
 
   let base: Binding = first
-  const more = (steps.moreTaps ?? []).filter((t) => t.tap || t.hold)
-  if (steps.doubleTap || steps.tapHold || more.length) {
+  if (multiTap) {
     const second = composeTap(file, { tap: steps.doubleTap, hold: steps.tapHold, holdTap: steps.secondHoldTap }, steps.tap)
     const bindings = [first, second, ...more.map((t) => composeTap(file, t, steps.tap))]
     const label = 'td_' + describeForLabel(steps.tap ?? steps.hold ?? first)
